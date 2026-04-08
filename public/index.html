@@ -249,12 +249,47 @@
 <div class="notif" id="notif">&#x2713;&nbsp; You&rsquo;re on the list. We&rsquo;ll be in touch.</div>
 
 <script>
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
     const notif = document.getElementById('notif');
-    notif.classList.add('show');
-    e.target.reset();
-    setTimeout(() => notif.classList.remove('show'), 3800);
+    const form = e.target;
+    const btn = form.querySelector('.capture-btn');
+    const input = form.querySelector('.capture-input');
+    const email = input.value.trim();
+
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Sending...';
+
+    try {
+      const response = await fetch('/api/signup', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        notif.textContent = '\u2713  You\u2019re on the list. We\u2019ll be in touch.';
+        notif.style.borderColor = 'var(--teal)';
+        notif.style.color = 'var(--teal)';
+        form.reset();
+      } else {
+        notif.textContent = '\u26a0  ' + (data.error || 'Something went wrong. Try again.');
+        notif.style.borderColor = '#e8a020';
+        notif.style.color = '#e8a020';
+      }
+    } catch (err) {
+      notif.textContent = '\u26a0  Network error. Please try again.';
+      notif.style.borderColor = '#e8a020';
+      notif.style.color = '#e8a020';
+    } finally {
+      notif.classList.add('show');
+      btn.disabled = false;
+      btn.textContent = originalText;
+      setTimeout(() => notif.classList.remove('show'), 3800);
+    }
   }
 </script>
 </body>
