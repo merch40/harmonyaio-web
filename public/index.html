@@ -29,7 +29,8 @@
     .hero-bg {
       position: absolute; inset: 0;
       background-image: url('./hero-bg.png');
-      background-size: cover; background-position: center 30%; z-index: 0;
+      background-size: 90%; background-position: center 30%;
+      background-repeat: no-repeat; z-index: 0;
     }
 
     /* Layered overlay: strong veil in the center text zone, reveals image at edges */
@@ -178,7 +179,8 @@
     @media (max-width: 600px) {
       .hero-bg {
         background-image: url('./hero-bg-mobile.png');
-        background-position: center top;
+        background-size: 50%; background-position: center top;
+        background-repeat: no-repeat;
       }
       .hero-bg::after {
         background:
