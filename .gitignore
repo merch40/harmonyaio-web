@@ -5,3 +5,15 @@ Thumbs.db
 node_modules/
 .env
 .env.local
+# Cloudflare local dev secrets - NEVER commit these
+.dev.vars
+.dev.vars.*
+
+# SSL certs if ever added locally
+*.pem
+*.key
+*.p12
+
+# Build output if build step added later
+dist/
+.wrangler/

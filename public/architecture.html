@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="description" content="Autonomous IT infrastructure that thinks, decides, and heals itself. Talk to your computer. It fixes itself.">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Harmony AIO — Architecture Overview</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,7 +25,7 @@
       --bg: #080806;
     }
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
+    html { background: #080808; scroll-behavior: smooth; }
     body { background: transparent; color: var(--white); font-family: 'DM Sans', sans-serif; overflow-x: hidden; }
 
     /* ── HERO HEADER ── */
@@ -62,19 +64,20 @@
       display: inline-flex; align-items: center; justify-content: center;
       width: 52px; height: 52px; border-radius: 11px;
       background: linear-gradient(135deg, var(--amber), var(--teal));
-      font-family: 'Cinzel', serif; font-weight: 900; font-size: 26px; color: #080806;
-      margin-bottom: 12px;
-      box-shadow: 0 0 40px rgba(232,160,32,0.4), 0 0 80px rgba(45,212,191,0.15);
+      font-family: 'Cinzel', serif; font-weight: 900; font-size: 26px; color: #080808;
+      margin-bottom: 14px;
+      box-shadow: 0 0 40px rgba(232,160,32,0.4), 0 0 80px rgba(45,212,191,0.2), 0 4px 24px rgba(0,0,0,0.6);
     }
     .wordmark-name {
       display: block; font-family: 'Cinzel', serif; font-weight: 600;
-      font-size: clamp(22px, 4vw, 40px); letter-spacing: 0.24em; color: var(--white);
+      font-size: clamp(26px, 4.5vw, 46px); letter-spacing: 0.24em; color: var(--white);
       text-shadow: 0 2px 30px rgba(0,0,0,0.9);
     }
     .wordmark-sub {
       display: block; font-family: 'DM Sans', sans-serif; font-weight: 300;
       font-size: 10px; letter-spacing: 0.38em; color: var(--teal);
-      text-transform: uppercase; margin-top: 7px;
+      text-transform: uppercase; margin-top: 9px;
+      text-shadow: 0 1px 12px rgba(0,0,0,0.8);
     }
     .hero-eyebrow {
       font-family: 'Cormorant Garamond', serif; font-style: italic; font-weight: 300;

@@ -17,7 +17,7 @@
       --dim: rgba(240,237,232,0.65);
     }
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    html { background: #080808; }
+    html { background: #080808; scroll-behavior: smooth; }
     body { background: transparent; color: var(--white); font-family: 'DM Sans', sans-serif; overflow-x: hidden; }
 
     /* HERO */
@@ -84,6 +84,7 @@
       letter-spacing: 0.03em;
     }
     .nav-item:hover { background: rgba(240,237,232,0.08); color: var(--white); }
+    .nav-item.active { color: var(--amber); }
     /* WORDMARK */
     .wordmark { position: relative; z-index: 2; margin-bottom: 44px; animation: fadeDown 1s ease both; }
     .wordmark-h {
