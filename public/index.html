@@ -17,19 +17,20 @@
       --dim: rgba(240,237,232,0.65);
     }
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { background: #080808; color: var(--white); font-family: 'DM Sans', sans-serif; overflow-x: hidden; }
+    html { background: #080808; }
+    body { background: transparent; color: var(--white); font-family: 'DM Sans', sans-serif; overflow-x: hidden; }
 
     /* HERO */
     .hero {
       position: relative; min-height: 100vh;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      text-align: center; padding: 80px 24px 120px; overflow: hidden;
+      text-align: center; padding: 80px 24px 120px;
     }
 
     .hero-bg {
-      position: absolute; inset: 0;
+      position: fixed; inset: 0;
       background-image: url('./hero-bg.png');
-      background-size: cover; background-position: center 30%; z-index: 0;
+      background-size: cover; background-position: center 30%; z-index: -1;
     }
 
     /* Layered overlay: strong veil in the center text zone, reveals image at edges */
@@ -206,7 +207,7 @@
     @media (max-width: 600px) {
       .hero-bg {
         background-image: url('./hero-bg-mobile.png');
-        background-size: cover; background-position: center 20%;
+        background-size: cover; background-position: center 20%; position: fixed;
       }
       .hero-bg::after {
         background:
