@@ -284,6 +284,22 @@
     }
     .nav-item:hover { background: rgba(240,237,232,0.08); color: var(--white); }
     .nav-item.active { color: var(--amber); }
+    /* H logo pulse -- subtle glow breathe to invite clicks */
+    @keyframes hPulse {
+      0%, 100% {
+        box-shadow: 0 0 40px rgba(232,160,32,0.4), 0 0 80px rgba(45,212,191,0.2), 0 4px 24px rgba(0,0,0,0.6);
+      }
+      50% {
+        box-shadow: 0 0 55px rgba(232,160,32,0.7), 0 0 100px rgba(45,212,191,0.4), 0 4px 32px rgba(0,0,0,0.6);
+      }
+    }
+    .wordmark-h {
+      animation: hPulse 2.8s ease-in-out infinite;
+    }
+    /* Pause pulse on hover so the hover glow takes over cleanly */
+    .wordmark-h:hover {
+      animation-play-state: paused;
+    }
   </style>
 </head>
 <body>
