@@ -246,6 +246,31 @@
     @media (max-width: 480px) {
       .agents-grid, .tiers-grid { grid-template-columns: 1fr; }
     }
+    /* H logo nav dropdown - same as index */
+    .wordmark-h-wrap { position: relative; display: inline-block; margin-bottom: 12px; }
+    .wordmark-h { cursor: pointer; transition: box-shadow 0.2s; }
+    .wordmark-h:hover { box-shadow: 0 0 50px rgba(232,160,32,0.5), 0 0 90px rgba(45,212,191,0.25); }
+    .nav-dropdown {
+      position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
+      background: rgba(8,8,8,0.92); backdrop-filter: blur(12px);
+      border: 1px solid rgba(240,237,232,0.15); border-radius: 10px;
+      padding: 6px; min-width: 160px; z-index: 100;
+      opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s;
+      transform: translateX(-50%) translateY(-6px);
+    }
+    .nav-dropdown.open { opacity: 1; pointer-events: all; transform: translateX(-50%) translateY(0); }
+    .nav-dropdown::before {
+      content: ''; position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+      width: 10px; height: 6px; background: rgba(8,8,8,0.92);
+      clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+    }
+    .nav-item {
+      display: block; padding: 9px 16px; color: rgba(240,237,232,0.7);
+      text-decoration: none; font-size: 13px; font-family: 'DM Sans', sans-serif;
+      border-radius: 7px; transition: background 0.15s, color 0.15s; letter-spacing: 0.03em;
+    }
+    .nav-item:hover { background: rgba(240,237,232,0.08); color: var(--white); }
+    .nav-item.active { color: var(--amber); }
   </style>
 </head>
 <body>
@@ -254,7 +279,13 @@
 <div class="hero">
   <div class="hero-bg"></div>
   <div class="hero-content">
-    <div class="wordmark-h">H</div>
+    <div class="wordmark-h-wrap">
+      <div class="wordmark-h" id="navTrigger">H</div>
+      <div class="nav-dropdown" id="navDropdown">
+        <a href="/" class="nav-item">Home</a>
+        <a href="/architecture.html" class="nav-item active">Architecture</a>
+      </div>
+    </div>
     <span class="wordmark-name">HARMONY AIO</span>
     <span class="wordmark-sub">AI Operations Orchestration</span>
     <p class="hero-eyebrow">Architecture <em>Overview</em></p>
@@ -391,5 +422,14 @@
   </footer>
 
 </div>
+<script>
+  const navTrigger = document.getElementById('navTrigger');
+  const navDropdown = document.getElementById('navDropdown');
+  navTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    navDropdown.classList.toggle('open');
+  });
+  document.addEventListener('click', () => navDropdown.classList.remove('open'));
+</script>
 </body>
 </html>
