@@ -29,8 +29,7 @@
     .hero-bg {
       position: absolute; inset: 0;
       background-image: url('./hero-bg.png');
-      background-size: 90%; background-position: center 30%;
-      background-repeat: no-repeat; z-index: 0;
+      background-size: cover; background-position: center 30%; z-index: 0;
     }
 
     /* Layered overlay: strong veil in the center text zone, reveals image at edges */
@@ -55,6 +54,35 @@
       100% { opacity: 0; transform: scaleX(1); }
     }
 
+    /* H logo nav dropdown */
+    .wordmark-h-wrap { position: relative; display: inline-block; margin-bottom: 14px; }
+    .wordmark-h { cursor: pointer; transition: box-shadow 0.2s; }
+    .wordmark-h:hover { box-shadow: 0 0 50px rgba(232,160,32,0.5), 0 0 90px rgba(45,212,191,0.25); }
+    .nav-dropdown {
+      position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
+      background: rgba(8,8,8,0.92); backdrop-filter: blur(12px);
+      border: 1px solid rgba(240,237,232,0.15); border-radius: 10px;
+      padding: 6px; min-width: 160px; z-index: 100;
+      opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s;
+      transform: translateX(-50%) translateY(-6px);
+    }
+    .nav-dropdown.open {
+      opacity: 1; pointer-events: all;
+      transform: translateX(-50%) translateY(0);
+    }
+    .nav-dropdown::before {
+      content: ''; position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+      width: 10px; height: 6px;
+      background: rgba(8,8,8,0.92);
+      clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+    }
+    .nav-item {
+      display: block; padding: 9px 16px; color: rgba(240,237,232,0.7);
+      text-decoration: none; font-size: 13px; font-family: 'DM Sans', sans-serif;
+      border-radius: 7px; transition: background 0.15s, color 0.15s;
+      letter-spacing: 0.03em;
+    }
+    .nav-item:hover { background: rgba(240,237,232,0.08); color: var(--white); }
     /* WORDMARK */
     .wordmark { position: relative; z-index: 2; margin-bottom: 44px; animation: fadeDown 1s ease both; }
     .wordmark-h {
@@ -210,7 +238,13 @@
   </div>
 
   <div class="wordmark">
-    <div class="wordmark-h">H</div>
+    <div class="wordmark-h-wrap">
+      <div class="wordmark-h" id="navTrigger">H</div>
+      <div class="nav-dropdown" id="navDropdown">
+        <a href="/" class="nav-item">Home</a>
+        <a href="/architecture.html" class="nav-item">Architecture</a>
+      </div>
+    </div>
     <span class="wordmark-name">HARMONY AIO</span>
     <span class="wordmark-sub">AI Operations Orchestration</span>
   </div>
@@ -305,6 +339,14 @@
       setTimeout(() => notif.classList.remove('show'), 3800);
     }
   }
+  // H logo nav toggle
+  const navTrigger = document.getElementById('navTrigger');
+  const navDropdown = document.getElementById('navDropdown');
+  navTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    navDropdown.classList.toggle('open');
+  });
+  document.addEventListener('click', () => navDropdown.classList.remove('open'));
 </script>
 </body>
 </html>
