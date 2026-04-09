@@ -71,7 +71,7 @@
     .wordmark-name {
       display: block; font-family: 'Cinzel', serif; font-weight: 600;
       font-size: clamp(26px, 4.5vw, 46px); letter-spacing: 0.24em; color: var(--white);
-      text-shadow: 0 2px 30px rgba(0,0,0,0.9);
+      text-shadow: 0 2px 30px rgba(0,0,0,0.9), 0 0 60px rgba(0,0,0,0.6);
     }
     .wordmark-sub {
       display: block; font-family: 'DM Sans', sans-serif; font-weight: 300;
@@ -79,12 +79,10 @@
       text-transform: uppercase; margin-top: 9px;
       text-shadow: 0 1px 12px rgba(0,0,0,0.8);
     }
-    .hero-eyebrow {
-      font-family: 'Cormorant Garamond', serif; font-style: italic; font-weight: 300;
+    .hero-eyebrow { font-family: 'Cormorant Garamond', serif; font-style: italic; font-weight: 300;
       font-size: clamp(18px, 2.5vw, 28px); color: rgba(240,237,232,0.75);
-      margin-top: 16px;
-      text-shadow: 0 2px 20px rgba(0,0,0,0.9);
-    }
+      margin-top: 16px; text-shadow: 0 2px 20px rgba(0,0,0,0.9);
+      animation: fadeUp 1s 0.4s ease both; }
     .hero-eyebrow em { font-style: normal; color: var(--amber); }
 
     /* ── PAGE BODY ── */
@@ -248,7 +246,8 @@
     .fade-in:nth-child(2) { animation-delay: 0.2s; }
     .fade-in:nth-child(3) { animation-delay: 0.3s; }
     .fade-in:nth-child(4) { animation-delay: 0.4s; }
-    @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+    @keyframes fadeDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
 
     /* ── RESPONSIVE ── */
     @media (max-width: 768px) {
@@ -260,7 +259,8 @@
       .agents-grid, .tiers-grid { grid-template-columns: 1fr; }
     }
     /* H logo nav dropdown - same as index */
-    .wordmark-h-wrap { position: relative; display: inline-block; margin-bottom: 12px; }
+    .wordmark { position: relative; z-index: 2; margin-bottom: 28px; animation: fadeDown 1s ease both; }
+    .wordmark-h-wrap { position: relative; display: inline-block; margin-bottom: 14px; }
     .wordmark-h { cursor: pointer; transition: box-shadow 0.2s; }
     .wordmark-h:hover { box-shadow: 0 0 50px rgba(232,160,32,0.5), 0 0 90px rgba(45,212,191,0.25); }
     .nav-dropdown {
@@ -292,15 +292,17 @@
 <div class="hero">
   <div class="hero-bg"></div>
   <div class="hero-content">
-    <div class="wordmark-h-wrap">
-      <div class="wordmark-h" id="navTrigger">H</div>
-      <div class="nav-dropdown" id="navDropdown">
-        <a href="/" class="nav-item">Home</a>
-        <a href="/architecture.html" class="nav-item active">Architecture</a>
+    <div class="wordmark">
+      <div class="wordmark-h-wrap">
+        <div class="wordmark-h" id="navTrigger">H</div>
+        <div class="nav-dropdown" id="navDropdown">
+          <a href="/" class="nav-item">Home</a>
+          <a href="/architecture.html" class="nav-item active">Architecture</a>
+        </div>
       </div>
+      <span class="wordmark-name">HARMONY AIO</span>
+      <span class="wordmark-sub">AI Operations Orchestration</span>
     </div>
-    <span class="wordmark-name">HARMONY AIO</span>
-    <span class="wordmark-sub">AI Operations Orchestration</span>
     <p class="hero-eyebrow">Architecture <em>Overview</em></p>
   </div>
 </div>
