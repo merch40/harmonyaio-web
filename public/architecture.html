@@ -36,14 +36,26 @@
     .hero-bg {
       position: absolute; inset: 0;
       background-image: url('./hero-bg.png');
-      background-size: cover; background-position: center 28%;
+      background-size: cover; background-position: center 30%; z-index: 0;
     }
     .hero-bg::after {
       content: ''; position: absolute; inset: 0;
       background:
-        radial-gradient(ellipse 70% 80% at 50% 40%, rgba(6,6,4,0.6) 0%, rgba(6,6,4,0.4) 50%, transparent 100%),
-        linear-gradient(to bottom, rgba(6,6,4,0.8) 0%, transparent 30%, transparent 55%, rgba(8,8,6,1) 100%),
-        linear-gradient(to right, rgba(8,8,6,0.6) 0%, transparent 20%, transparent 80%, rgba(8,8,6,0.6) 100%);
+        radial-gradient(ellipse 55% 60% at 50% 42%, rgba(6,6,8,0.72) 0%, rgba(6,6,8,0.45) 55%, transparent 100%),
+        linear-gradient(to bottom, rgba(6,6,8,0.82) 0%, rgba(6,6,8,0.3) 20%, rgba(6,6,8,0.3) 60%, rgba(6,6,8,0.9) 100%),
+        linear-gradient(to right, rgba(6,6,8,0.5) 0%, transparent 25%, transparent 75%, rgba(6,6,8,0.5) 100%);
+    }
+    /* Mobile: same portrait image as index */
+    @media (max-width: 600px) {
+      .hero-bg {
+        background-image: url('./hero-bg-mobile.png');
+        background-size: cover; background-position: center 20%;
+      }
+      .hero-bg::after {
+        background:
+          radial-gradient(ellipse 80% 50% at 50% 35%, rgba(6,6,8,0.82) 0%, rgba(6,6,8,0.5) 55%, transparent 100%),
+          linear-gradient(to bottom, rgba(6,6,8,0.75) 0%, rgba(6,6,8,0.2) 18%, rgba(6,6,8,0.2) 65%, rgba(6,6,8,0.95) 100%);
+      }
     }
     .hero-content { position: relative; z-index: 2; }
     .wordmark-h {
@@ -221,13 +233,10 @@
     }
     .security-band p { font-size: 13px; color: var(--dim); line-height: 1.7; }
 
-    /* ── FOOTER ── */
-    .arch-footer {
-      text-align: center; padding-top: 28px;
-      border-top: 1px solid rgba(240,237,232,0.07);
-    }
-    .arch-footer p { font-size: 12px; color: rgba(240,237,232,0.25); letter-spacing: 0.04em; }
-    .arch-footer .conf { color: var(--teal); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; margin-top: 6px; }
+    /* ── FOOTER -- matches index.html ── */
+    .footer { padding: 32px 24px; text-align: center; border-top: none; }
+    .footer-copy { font-size: 12px; color: rgba(240,237,232,0.25); letter-spacing: 0.05em; }
+    .footer-copy a { color: var(--teal); text-decoration: none; }
 
     /* ── FADE-IN ANIMATIONS ── */
     .fade-in { opacity: 0; transform: translateY(20px); animation: fadeUp 0.7s ease forwards; }
