@@ -250,6 +250,7 @@
       transition: transform 0.6s ease, opacity 0.4s ease;
     }
     .harmony-overlay.open .harmony-card { transform: translateY(0); }
+    .harmony-overlay.typing .harmony-card,
     .harmony-overlay.bloom .harmony-card { opacity: 0; pointer-events: none; }
 
     .harmony-line {
@@ -312,25 +313,30 @@
 
     .bloom-console {
       position: absolute;
-      left: 50%; top: 60%;
-      transform: translateX(-50%);
+      left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
       font-family: 'Courier New', Courier, monospace;
-      font-size: 13px; color: var(--teal); text-align: center;
+      font-size: 14px; color: var(--teal); text-align: left;
       letter-spacing: 0.06em;
       text-shadow: 0 0 12px rgba(45,212,191,0.7);
       width: max-content; max-width: 90vw;
+      line-height: 1.85;
     }
-    .bloom-console p { opacity: 0; margin-top: 8px; }
-    .harmony-overlay.bloom .bloom-console p {
-      animation: lineFade 0.5s ease forwards;
+    .bloom-console p { opacity: 0; min-height: 1.4em; }
+    .harmony-overlay.typing .bloom-console p,
+    .harmony-overlay.bloom .bloom-console p { opacity: 1; }
+    /* Blinking block cursor while a line is being typed */
+    .bloom-console p.typing-now::after {
+      content: '';
+      display: inline-block;
+      width: 8px; height: 14px;
+      background: var(--teal);
+      margin-left: 4px;
+      vertical-align: text-bottom;
+      box-shadow: 0 0 8px rgba(45,212,191,0.7);
+      animation: cursorBlink 0.6s steps(1) infinite;
     }
-    .harmony-overlay.bloom .bloom-console p:nth-child(1) { animation-delay: 0.45s; }
-    .harmony-overlay.bloom .bloom-console p:nth-child(2) { animation-delay: 0.90s; }
-    .harmony-overlay.bloom .bloom-console p:nth-child(3) { animation-delay: 1.35s; }
-    @keyframes lineFade {
-      from { opacity: 0; transform: translateY(8px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
+    @keyframes cursorBlink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
 
     /* Reduced motion: keep the layout, kill the heavy animations */
     @media (prefers-reduced-motion: reduce) {
@@ -473,15 +479,20 @@
     }
   }
   // ── HARMONY EASTER EGG ──
-  // Soft synthesized chord on H hover, manifesto card on click,
-  // bloom + console transition into the architecture page.
+  // Synthesized strings on H hover, manifesto card on click, typed console
+  // lines after clicking the line, then a bloom transition into architecture.
 
   let audioCtx = null;
   let hoverSwell = null;
   let clickSwell = null;
+  // When the H is clicked we 'lock' the hover swell so it sustains underneath
+  // the manifesto card instead of stopping when the cursor leaves the H.
+  let interactionLocked = false;
 
   // The audio context can only initialize after a user gesture, otherwise the
-  // browser blocks autoplay.  We arm it on the first interaction of any kind.
+  // browser blocks autoplay.  We arm it on the first interaction of any kind,
+  // and immediately play 50ms of silence to warm up the audio path so the
+  // very first real chord does not get a buffer-start click pop.
   function ensureAudio() {
     if (audioCtx) {
       if (audioCtx.state === 'suspended') {
@@ -493,6 +504,14 @@
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return null;
       audioCtx = new AC();
+      // Pre-warm: 50ms of pure silence to fill the first audio buffer cleanly
+      const warmGain = audioCtx.createGain();
+      warmGain.gain.value = 0;
+      warmGain.connect(audioCtx.destination);
+      const warmOsc = audioCtx.createOscillator();
+      warmOsc.connect(warmGain);
+      warmOsc.start(audioCtx.currentTime);
+      warmOsc.stop(audioCtx.currentTime + 0.05);
     } catch (e) {
       console.warn('audio context unavailable', e);
       return null;
@@ -503,84 +522,117 @@
     document.addEventListener(evt, ensureAudio, { once: true, passive: true });
   });
 
-  // playChord builds a string pad style swell: stacked sawtooth pairs per voice
-  // through a lowpass filter that opens during the attack, plus subtle vibrato.
-  // Pure sine/triangle stacks sounded like an electric hum.  This is synth strings.
+  // playChord uses a custom PeriodicWave shaped like a bowed string spectrum
+  // (strong fundamental, prominent 2nd and 3rd, gradually decaying upper
+  // harmonics) through a gentle lowpass and a master compressor.  This sounds
+  // way more like an actual instrument than the sawtooth-and-sweep version it
+  // replaces, which read as 'synth pad' instead of 'string section'.
   function playChord(frequencies, peakGain, attackSec) {
     const ctx = ensureAudio();
     if (!ctx) return null;
     try {
       const now = ctx.currentTime;
 
-      // Master envelope: silence up to peak gain across the attack window
+      // Bowed-string-ish harmonic series.  Stronger 2nd and 3rd than a basic
+      // sawtooth, gentler upper-harmonic falloff, slight odd-harmonic emphasis
+      const stringReal = new Float32Array([
+        0,     // DC (must be zero)
+        1.0,   // 1st (fundamental)
+        0.7,   // 2nd
+        0.55,  // 3rd
+        0.3,   // 4th
+        0.32,  // 5th
+        0.18,  // 6th
+        0.2,   // 7th
+        0.12,  // 8th
+        0.13,  // 9th
+        0.08,  // 10th
+        0.09,  // 11th
+        0.06,  // 12th
+        0.05,  // 13th
+        0.04,  // 14th
+        0.04   // 15th
+      ]);
+      const stringImag = new Float32Array(stringReal.length);
+      const stringWave = ctx.createPeriodicWave(stringReal, stringImag);
+
+      // Master compressor catches any peaks (this is what kills the BOOM)
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -16;
+      comp.knee.value = 8;
+      comp.ratio.value = 4;
+      comp.attack.value = 0.005;
+      comp.release.value = 0.15;
+
+      // Master envelope: linear ramp from TRUE ZERO to a small value, then
+      // exponential up to peak.  Going from absolute silence with a linear
+      // pre-ramp prevents the first-sample click pop that exponential ramps
+      // starting from 0.0001 can produce on a fresh audio context.
       const master = ctx.createGain();
-      master.gain.setValueAtTime(0.0001, now);
+      master.gain.setValueAtTime(0, now);
+      master.gain.linearRampToValueAtTime(0.001, now + 0.02);
       master.gain.exponentialRampToValueAtTime(peakGain, now + attackSec);
 
-      // Lowpass filter that opens as the swell builds.  This is the trick that
-      // turns raw sawtooths into something that reads as orchestral.
+      // Gentle lowpass: low Q so no resonance ringing, opens slightly during attack
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
-      filter.Q.value = 1.1;
-      filter.frequency.setValueAtTime(360, now);
-      filter.frequency.exponentialRampToValueAtTime(2600, now + attackSec * 1.4);
+      filter.Q.value = 0.4;
+      filter.frequency.setValueAtTime(900, now);
+      filter.frequency.linearRampToValueAtTime(2400, now + attackSec * 1.2);
 
       master.connect(filter);
-      filter.connect(ctx.destination);
+      filter.connect(comp);
+      comp.connect(ctx.destination);
 
       const nodes = [];
       frequencies.forEach((freq, i) => {
-        // Stagger voices slightly so they enter like a section, not a stab
-        const startTime = now + (i * 0.025);
+        // Stagger voices slightly so the chord enters like a section, not a stab
+        const startTime = now + (i * 0.04);
 
-        // Two slightly detuned sawtooths per note for chorus / super saw warmth
-        const oscA = ctx.createOscillator();
-        const oscB = ctx.createOscillator();
-        oscA.type = 'sawtooth';
-        oscB.type = 'sawtooth';
-        oscA.frequency.value = freq;
-        oscB.frequency.value = freq;
-        oscA.detune.value = -7;
-        oscB.detune.value = 7;
+        // Single oscillator per voice using the string PeriodicWave.
+        // Cleaner than the super-saw approach and sounds less synthy.
+        const osc = ctx.createOscillator();
+        osc.setPeriodicWave(stringWave);
+        osc.frequency.value = freq;
+        osc.detune.value = (i % 2 === 0) ? -3 : 3;
 
         // Per voice vibrato LFO at slightly different rates so they do not sync
         const lfo = ctx.createOscillator();
         const lfoDepth = ctx.createGain();
-        lfo.frequency.value = 4.6 + (i * 0.31);
-        lfoDepth.gain.value = 4; // about 4 cents of pitch wobble
+        lfo.frequency.value = 4.3 + (i * 0.27);
+        lfoDepth.gain.value = 5;
         lfo.connect(lfoDepth);
-        lfoDepth.connect(oscA.detune);
-        lfoDepth.connect(oscB.detune);
+        lfoDepth.connect(osc.detune);
 
         // Per voice gain, normalized so adding more notes does not blow out
         const voiceGain = ctx.createGain();
-        voiceGain.gain.value = 0.85 / Math.sqrt(frequencies.length);
+        voiceGain.gain.value = 0.7 / Math.sqrt(frequencies.length);
 
-        oscA.connect(voiceGain);
-        oscB.connect(voiceGain);
+        osc.connect(voiceGain);
         voiceGain.connect(master);
 
-        oscA.start(startTime);
-        oscB.start(startTime);
+        osc.start(startTime);
         lfo.start(startTime);
 
-        nodes.push(oscA, oscB, lfo);
+        nodes.push(osc, lfo);
       });
 
       return {
         stop(releaseSec) {
           const t = ctx.currentTime;
-          const r = releaseSec || 0.6;
+          const r = releaseSec || 0.7;
           try {
             master.gain.cancelScheduledValues(t);
             master.gain.setValueAtTime(Math.max(master.gain.value, 0.0001), t);
             master.gain.exponentialRampToValueAtTime(0.0001, t + r);
-            // Close the filter on release for a natural fade, like a bow lifting
+            // Final linear pull to true zero so there is no click on stop
+            master.gain.linearRampToValueAtTime(0, t + r + 0.05);
+            // Close the filter on release like a bow lifting
             filter.frequency.cancelScheduledValues(t);
             filter.frequency.setValueAtTime(filter.frequency.value, t);
-            filter.frequency.exponentialRampToValueAtTime(400, t + r);
+            filter.frequency.linearRampToValueAtTime(700, t + r);
             nodes.forEach((n) => {
-              try { n.stop(t + r + 0.08); } catch (e) {}
+              try { n.stop(t + r + 0.1); } catch (e) {}
             });
           } catch (e) {
             console.warn('chord stop failed', e);
@@ -593,9 +645,10 @@
     }
   }
 
-  // A major with octave doubling.  Click chord adds A4 for sparkle.
-  const HOVER_CHORD = [110.00, 164.81, 220.00, 277.18, 329.63];
-  const CLICK_CHORD = [110.00, 164.81, 220.00, 277.18, 329.63, 440.00];
+  // A major chord moved up an octave from the original to keep the bass note
+  // out of the boom/hum register.  Click chord adds A5 on top for sparkle.
+  const HOVER_CHORD = [220.00, 329.63, 440.00, 554.37, 659.25];
+  const CLICK_CHORD = [220.00, 329.63, 440.00, 554.37, 659.25, 880.00];
 
   const eggButton = document.getElementById('harmonyEgg');
   const overlay = document.getElementById('harmonyOverlay');
@@ -608,8 +661,11 @@
   }
   function closeOverlay() {
     overlay.classList.remove('open');
+    overlay.classList.remove('typing');
+    overlay.classList.remove('bloom');
     overlay.setAttribute('aria-hidden', 'true');
     document.body.style.overflow = '';
+    interactionLocked = false;
     if (hoverSwell) { hoverSwell.stop(0.5); hoverSwell = null; }
     if (clickSwell) { clickSwell.stop(0.3); clickSwell = null; }
   }
@@ -620,45 +676,112 @@
     hoverSwell = playChord(HOVER_CHORD, 0.05, 0.55);
   });
   eggButton.addEventListener('mouseleave', () => {
+    // Once locked in (after a click) the swell sustains regardless of cursor
+    if (interactionLocked) return;
     if (hoverSwell) { hoverSwell.stop(0.7); hoverSwell = null; }
   });
 
-  // Click the H: stop the hover swell, open the manifesto card
+  // Click the H: lock in the hover swell so it sustains underneath the
+  // manifesto card, then open the card.  No new chord is started here.
   eggButton.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (hoverSwell) { hoverSwell.stop(0.4); hoverSwell = null; }
+    interactionLocked = true;
+    // If somehow the user got here without a hover swell (keyboard), start one
+    if (!hoverSwell) hoverSwell = playChord(HOVER_CHORD, 0.05, 0.55);
     openOverlay();
   });
   // Keyboard accessibility: Enter or Space on the focused H opens the card
   eggButton.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
+      interactionLocked = true;
+      if (!hoverSwell) hoverSwell = playChord(HOVER_CHORD, 0.05, 0.55);
       openOverlay();
     }
   });
 
-  // Click the line: bigger swell, bloom, then navigate to architecture
-  harmonyLine.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (overlay.classList.contains('bloom')) return;
-    clickSwell = playChord(CLICK_CHORD, 0.10, 0.4);
+  // Type a single line character by character with a blinking cursor.
+  // The original text is cached on first run so re-runs work cleanly.
+  function typeLine(line, doneCallback) {
+    if (!line.dataset.text) line.dataset.text = line.textContent;
+    const text = line.dataset.text;
+    line.textContent = '';
+    line.classList.add('typing-now');
+    let charIdx = 0;
+    const tick = setInterval(() => {
+      if (charIdx >= text.length) {
+        clearInterval(tick);
+        // Brief pause with the cursor still at the end of the line
+        setTimeout(() => {
+          line.classList.remove('typing-now');
+          doneCallback();
+        }, 280);
+        return;
+      }
+      line.textContent += text.charAt(charIdx);
+      charIdx++;
+    }, 32);
+  }
+
+  // Walk through the console lines one at a time, then trigger the bloom.
+  // Respects prefers-reduced-motion by showing all lines instantly.
+  function typeConsoleLines() {
+    const lines = document.querySelectorAll('.bloom-console p');
+    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) {
+      lines.forEach((line) => {
+        if (!line.dataset.text) line.dataset.text = line.textContent;
+        line.textContent = line.dataset.text;
+      });
+      setTimeout(triggerBloom, 600);
+      return;
+    }
+    let idx = 0;
+    function nextLine() {
+      if (idx >= lines.length) {
+        setTimeout(triggerBloom, 420);
+        return;
+      }
+      typeLine(lines[idx], () => {
+        idx++;
+        nextLine();
+      });
+    }
+    nextLine();
+  }
+
+  // After the lines have typed in, fire the bloom and navigate
+  function triggerBloom() {
     overlay.classList.add('bloom');
     setTimeout(() => {
-      if (clickSwell) { clickSwell.stop(0.45); clickSwell = null; }
+      if (clickSwell) { clickSwell.stop(0.55); clickSwell = null; }
+      if (hoverSwell) { hoverSwell.stop(0.55); hoverSwell = null; }
       window.location.href = '/architecture.html';
-    }, 2300);
+    }, 1700);
+  }
+
+  // Click the line: stop the hover swell, kick off the bigger click chord,
+  // fade the card, type the console lines, bloom, then navigate.
+  harmonyLine.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (overlay.classList.contains('typing') || overlay.classList.contains('bloom')) return;
+    if (hoverSwell) { hoverSwell.stop(0.4); hoverSwell = null; }
+    clickSwell = playChord(CLICK_CHORD, 0.09, 0.45);
+    overlay.classList.add('typing');
+    // Wait for the card to fade out, then start typing the console lines
+    setTimeout(typeConsoleLines, 480);
   });
 
-  // Click the dim background closes the overlay (only before bloom starts)
+  // Click the dim background closes the overlay (only before typing starts)
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay && !overlay.classList.contains('bloom')) {
+    if (e.target === overlay && !overlay.classList.contains('typing') && !overlay.classList.contains('bloom')) {
       closeOverlay();
     }
   });
 
-  // Escape closes the overlay before the bloom starts
+  // Escape closes the overlay before typing starts
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && overlay.classList.contains('open') && !overlay.classList.contains('bloom')) {
+    if (e.key === 'Escape' && overlay.classList.contains('open') && !overlay.classList.contains('typing') && !overlay.classList.contains('bloom')) {
       closeOverlay();
     }
   });
