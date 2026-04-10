@@ -533,25 +533,26 @@
     try {
       const now = ctx.currentTime;
 
-      // Bowed-string-ish harmonic series.  Stronger 2nd and 3rd than a basic
-      // sawtooth, gentler upper-harmonic falloff, slight odd-harmonic emphasis
+      // Fundamental-dominated harmonic series with rapid upper falloff.
+      // The previous spectrum had too much 4th-7th harmonic energy which read
+      // as brass.  This is much more bowed-string-shaped: strong fundamental,
+      // moderate 2nd, smaller 3rd, then a steep drop through the upper rows.
       const stringReal = new Float32Array([
-        0,     // DC (must be zero)
-        1.0,   // 1st (fundamental)
-        0.7,   // 2nd
-        0.55,  // 3rd
-        0.3,   // 4th
-        0.32,  // 5th
-        0.18,  // 6th
-        0.2,   // 7th
-        0.12,  // 8th
-        0.13,  // 9th
-        0.08,  // 10th
-        0.09,  // 11th
-        0.06,  // 12th
-        0.05,  // 13th
-        0.04,  // 14th
-        0.04   // 15th
+        0,      // DC (must be zero)
+        1.0,    // 1st (fundamental, dominant)
+        0.5,    // 2nd (octave, half strength)
+        0.25,   // 3rd
+        0.13,   // 4th
+        0.08,   // 5th
+        0.05,   // 6th
+        0.035,  // 7th
+        0.022,  // 8th
+        0.015,  // 9th
+        0.01,   // 10th
+        0.008,  // 11th
+        0.006,  // 12th
+        0.004,  // 13th
+        0.003   // 14th
       ]);
       const stringImag = new Float32Array(stringReal.length);
       const stringWave = ctx.createPeriodicWave(stringReal, stringImag);
@@ -577,8 +578,8 @@
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
       filter.Q.value = 0.4;
-      filter.frequency.setValueAtTime(900, now);
-      filter.frequency.linearRampToValueAtTime(2400, now + attackSec * 1.2);
+      filter.frequency.setValueAtTime(600, now);
+      filter.frequency.linearRampToValueAtTime(1700, now + attackSec * 1.2);
 
       master.connect(filter);
       filter.connect(comp);
@@ -630,7 +631,7 @@
             // Close the filter on release like a bow lifting
             filter.frequency.cancelScheduledValues(t);
             filter.frequency.setValueAtTime(filter.frequency.value, t);
-            filter.frequency.linearRampToValueAtTime(700, t + r);
+            filter.frequency.linearRampToValueAtTime(500, t + r);
             nodes.forEach((n) => {
               try { n.stop(t + r + 0.1); } catch (e) {}
             });
@@ -653,6 +654,14 @@
   const eggButton = document.getElementById('harmonyEgg');
   const overlay = document.getElementById('harmonyOverlay');
   const harmonyLine = document.getElementById('harmonyLine');
+
+  // Cache the original console text and immediately clear it.  Without this
+  // the lines flash visible for one frame when .typing is added (before the
+  // typing animation has had a chance to clear them itself).
+  document.querySelectorAll('.bloom-console p').forEach((line) => {
+    line.dataset.text = line.textContent;
+    line.textContent = '';
+  });
 
   function openOverlay() {
     overlay.classList.add('open');
