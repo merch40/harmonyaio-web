@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Harmony Sound Tuner</title>
+<style>
+:root {
+  --amber: #e8a020;
+  --teal: #2dd4bf;
+  --white: #f0ede8;
+  --bg: #0a0a0c;
+  --panel: rgba(20,18,16,0.85);
+  --border: rgba(240,237,232,0.12);
+  --dim: rgba(240,237,232,0.55);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--white);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  padding: 32px 24px 80px;
+  max-width: 1100px;
+  margin: 0 auto;
+  font-size: 14px;
+}
+h1 {
+  font-size: 24px; letter-spacing: 0.04em; margin-bottom: 4px;
+  color: var(--white); font-weight: 600;
+}
+.subtitle { color: var(--dim); font-size: 13px; margin-bottom: 28px; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 24px;
+  margin-bottom: 18px;
+  backdrop-filter: blur(10px);
+}
+.panel-title {
+  font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--teal); margin-bottom: 18px;
+}
+
+/* Harmonic sliders in a 3 column grid */
+.harmonics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px 28px;
+}
+.harmonic {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.harmonic-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--dim);
+}
+.harmonic-val {
+  color: var(--amber);
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+}
+.harmonic input[type=range] {
+  width: 100%;
+  cursor: pointer;
+  accent-color: var(--amber);
+  height: 6px;
+}
+
+/* Parameter sliders */
+.params {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px 32px;
+}
+.param {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.param-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--dim);
+}
+.param-val {
+  color: var(--teal);
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+}
+.param input[type=range] {
+  width: 100%;
+  accent-color: var(--teal);
+  cursor: pointer;
+  height: 6px;
+}
+
+/* Buttons */
+.button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+button {
+  background: linear-gradient(135deg, var(--amber), #c07010);
+  color: #080808;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 22px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  font-family: inherit;
+  letter-spacing: 0.04em;
+}
+button:hover { opacity: 0.88; }
+button:active { transform: translateY(1px); }
+button.secondary {
+  background: rgba(240,237,232,0.07);
+  color: var(--white);
+  border: 1px solid var(--border);
+}
+button.preset {
+  background: rgba(45,212,191,0.1);
+  color: var(--teal);
+  border: 1px solid rgba(45,212,191,0.3);
+  padding: 9px 16px;
+  font-size: 12px;
+}
+button.preset:hover { background: rgba(45,212,191,0.18); }
+
+/* Output code box */
+.code-box {
+  background: #050507;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 18px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: var(--teal);
+  white-space: pre;
+  overflow-x: auto;
+  line-height: 1.7;
+  user-select: all;
+}
+
+.notice {
+  font-size: 11px;
+  color: rgba(240,237,232,0.4);
+  margin-top: 10px;
+}
+
+@media (max-width: 760px) {
+  .harmonics { grid-template-columns: repeat(2, 1fr); }
+  .params { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  .harmonics { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<h1>Harmony Sound Tuner</h1>
+<p class="subtitle">Adjust the harmonics and filter, hit play, listen.  When the chord sounds right, copy the output and send it back.</p>
+
+<!-- TRANSPORT -->
+<div class="panel">
+  <div class="panel-title">Test</div>
+  <div class="button-row">
+    <button id="playChord">Play Chord (4 sec)</button>
+    <button id="playNote" class="secondary">Play Single Note (A4)</button>
+    <button id="stop" class="secondary">Stop</button>
+  </div>
+</div>
+
+<!-- PRESETS -->
+<div class="panel">
+  <div class="panel-title">Starting Points</div>
+  <div class="button-row">
+    <button class="preset" data-preset="current">Current Site</button>
+    <button class="preset" data-preset="cello">Cello-ish</button>
+    <button class="preset" data-preset="violin">Violin-ish</button>
+    <button class="preset" data-preset="brass">Brass</button>
+    <button class="preset" data-preset="piano">Piano-ish</button>
+    <button class="preset" data-preset="organ">Organ</button>
+    <button class="preset" data-preset="flute">Flute</button>
+    <button class="preset" data-preset="reset">Pure Sine</button>
+  </div>
+</div>
+
+<!-- HARMONICS -->
+<div class="panel">
+  <div class="panel-title">Harmonic Spectrum (1 = fundamental, higher numbers = overtones)</div>
+  <div class="harmonics" id="harmonics"></div>
+</div>
+
+<!-- PARAMETERS -->
+<div class="panel">
+  <div class="panel-title">Filter and Envelope</div>
+  <div class="params" id="params"></div>
+</div>
+
+<!-- OUTPUT -->
+<div class="panel">
+  <div class="panel-title">Output</div>
+  <pre class="code-box" id="output"></pre>
+  <div class="button-row" style="margin-top: 12px;">
+    <button id="copyOut" class="secondary">Copy to Clipboard</button>
+  </div>
+  <p class="notice">Send these numbers back and they will get patched into the live site.</p>
+</div>
+
+<script>
+// ---- State ----
+const HARMONIC_COUNT = 15;
+
+const PRESETS = {
+  // Current live site values
+  current:  [1.0, 0.5, 0.25, 0.13, 0.08, 0.05, 0.035, 0.022, 0.015, 0.01, 0.008, 0.006, 0.004, 0.003, 0],
+  // Cello-ish: strong fundamental, moderate 2nd and 3rd, fast falloff
+  cello:    [1.0, 0.55, 0.32, 0.18, 0.1, 0.06, 0.04, 0.025, 0.015, 0.01, 0.008, 0.005, 0.004, 0.002, 0],
+  // Violin-ish: more upper harmonic energy, slight odd emphasis
+  violin:   [1.0, 0.6, 0.45, 0.28, 0.22, 0.15, 0.1, 0.07, 0.05, 0.03, 0.022, 0.015, 0.01, 0.007, 0.005],
+  // Brass: prominent upper-mid harmonics, slow falloff
+  brass:    [0.9, 0.85, 0.7, 0.55, 0.4, 0.3, 0.22, 0.15, 0.1, 0.07, 0.05, 0.03, 0.02, 0.015, 0.01],
+  // Piano: strong fundamental, decaying upper harmonics, very fast falloff after the 5th
+  piano:    [1.0, 0.6, 0.4, 0.3, 0.18, 0.1, 0.06, 0.035, 0.02, 0.012, 0.007, 0.004, 0.003, 0.002, 0],
+  // Hammond-style organ: strong fundamental + octave, some 5ths and octaves above
+  organ:    [1.0, 1.0, 0, 0.8, 0, 0.6, 0, 0.4, 0, 0.3, 0, 0.2, 0, 0.1, 0],
+  // Flute: nearly pure with a small 2nd
+  flute:    [1.0, 0.4, 0.15, 0.05, 0.02, 0.01, 0.005, 0, 0, 0, 0, 0, 0, 0, 0],
+  // Pure sine: just the fundamental
+  reset:    [1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+};
+
+const state = {
+  harmonics: [...PRESETS.current],
+  filterQ: 0.4,
+  filterStart: 600,
+  filterEnd: 1700,
+  attack: 0.55,
+  vibratoDepth: 5,
+  vibratoRate: 4.3,
+  peakGain: 0.05
+};
+
+// ---- Build harmonic sliders ----
+const harmonicsContainer = document.getElementById('harmonics');
+function ordLabel(n) {
+  if (n === 1) return '1st (fundamental)';
+  if (n === 2) return '2nd (octave)';
+  if (n === 3) return '3rd (octave + 5th)';
+  return n + 'th harmonic';
+}
+for (let i = 0; i < HARMONIC_COUNT; i++) {
+  const wrap = document.createElement('div');
+  wrap.className = 'harmonic';
+  wrap.innerHTML =
+    '<div class="harmonic-label">' +
+      '<span>' + ordLabel(i + 1) + '</span>' +
+      '<span class="harmonic-val" id="hval-' + i + '">' + state.harmonics[i].toFixed(2) + '</span>' +
+    '</div>' +
+    '<input type="range" min="0" max="1" step="0.01" value="' + state.harmonics[i] + '" data-idx="' + i + '">';
+  harmonicsContainer.appendChild(wrap);
+}
+document.querySelectorAll('.harmonic input').forEach((input) => {
+  input.addEventListener('input', (e) => {
+    const idx = parseInt(e.target.dataset.idx);
+    state.harmonics[idx] = parseFloat(e.target.value);
+    document.getElementById('hval-' + idx).textContent = state.harmonics[idx].toFixed(2);
+    updateOutput();
+  });
+});
+
+// ---- Build parameter sliders ----
+const PARAMS = [
+  { key: 'filterStart',  label: 'Filter Start (Hz)',     min: 100,  max: 4000, step: 10,    fmt: (v) => v.toFixed(0) },
+  { key: 'filterEnd',    label: 'Filter End (Hz)',       min: 500,  max: 8000, step: 10,    fmt: (v) => v.toFixed(0) },
+  { key: 'filterQ',      label: 'Filter Q',              min: 0.1,  max: 5,    step: 0.05,  fmt: (v) => v.toFixed(2) },
+  { key: 'attack',       label: 'Attack (sec)',          min: 0.05, max: 2,    step: 0.05,  fmt: (v) => v.toFixed(2) },
+  { key: 'vibratoDepth', label: 'Vibrato Depth (cents)', min: 0,    max: 25,   step: 0.5,   fmt: (v) => v.toFixed(1) },
+  { key: 'vibratoRate',  label: 'Vibrato Rate (Hz)',     min: 0,    max: 10,   step: 0.1,   fmt: (v) => v.toFixed(1) },
+  { key: 'peakGain',     label: 'Peak Gain',             min: 0.01, max: 0.3,  step: 0.005, fmt: (v) => v.toFixed(3) }
+];
+const paramsContainer = document.getElementById('params');
+PARAMS.forEach((p) => {
+  const div = document.createElement('div');
+  div.className = 'param';
+  div.innerHTML =
+    '<div class="param-label">' +
+      '<span>' + p.label + '</span>' +
+      '<span class="param-val" id="pval-' + p.key + '">' + p.fmt(state[p.key]) + '</span>' +
+    '</div>' +
+    '<input type="range" min="' + p.min + '" max="' + p.max + '" step="' + p.step + '" value="' + state[p.key] + '" data-key="' + p.key + '">';
+  paramsContainer.appendChild(div);
+});
+document.querySelectorAll('.param input').forEach((input) => {
+  input.addEventListener('input', (e) => {
+    const key = e.target.dataset.key;
+    state[key] = parseFloat(e.target.value);
+    const p = PARAMS.find((x) => x.key === key);
+    document.getElementById('pval-' + key).textContent = p.fmt(state[key]);
+    updateOutput();
+  });
+});
+
+// ---- Audio engine (mirrors playChord from index.html) ----
+let audioCtx = null;
+let activeChord = null;
+
+function ensureAudio() {
+  if (audioCtx) {
+    if (audioCtx.state === 'suspended') {
+      try { audioCtx.resume(); } catch (e) {}
+    }
+    return audioCtx;
+  }
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Pre-warm with 50ms of silence
+    const g = audioCtx.createGain();
+    g.gain.value = 0;
+    g.connect(audioCtx.destination);
+    const o = audioCtx.createOscillator();
+    o.connect(g);
+    o.start();
+    o.stop(audioCtx.currentTime + 0.05);
+  } catch (e) {
+    console.warn('audio context unavailable', e);
+    return null;
+  }
+  return audioCtx;
+}
+
+function buildPeriodicWave(ctx) {
+  // PeriodicWave format: real[0] is DC, real[1+] are harmonics
+  const real = new Float32Array([0, ...state.harmonics]);
+  const imag = new Float32Array(real.length);
+  return ctx.createPeriodicWave(real, imag);
+}
+
+function playChord(frequencies) {
+  stopChord();
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  const wave = buildPeriodicWave(ctx);
+
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -16;
+  comp.knee.value = 8;
+  comp.ratio.value = 4;
+  comp.attack.value = 0.005;
+  comp.release.value = 0.15;
+
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0, now);
+  master.gain.linearRampToValueAtTime(0.001, now + 0.02);
+  master.gain.exponentialRampToValueAtTime(state.peakGain, now + state.attack);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.Q.value = state.filterQ;
+  filter.frequency.setValueAtTime(state.filterStart, now);
+  filter.frequency.linearRampToValueAtTime(state.filterEnd, now + state.attack * 1.2);
+
+  master.connect(filter);
+  filter.connect(comp);
+  comp.connect(ctx.destination);
+
+  const nodes = [];
+  frequencies.forEach((freq, i) => {
+    const startTime = now + (i * 0.04);
+    const osc = ctx.createOscillator();
+    osc.setPeriodicWave(wave);
+    osc.frequency.value = freq;
+    osc.detune.value = (i % 2 === 0) ? -3 : 3;
+
+    const lfo = ctx.createOscillator();
+    const lfoDepth = ctx.createGain();
+    lfo.frequency.value = state.vibratoRate + (i * 0.27);
+    lfoDepth.gain.value = state.vibratoDepth;
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(osc.detune);
+
+    const voiceGain = ctx.createGain();
+    voiceGain.gain.value = 0.7 / Math.sqrt(frequencies.length);
+
+    osc.connect(voiceGain);
+    voiceGain.connect(master);
+    osc.start(startTime);
+    lfo.start(startTime);
+    nodes.push(osc, lfo);
+  });
+
+  activeChord = { master, filter, nodes };
+  setTimeout(stopChord, 4000);
+}
+
+function stopChord() {
+  if (!activeChord || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  const r = 0.6;
+  try {
+    activeChord.master.gain.cancelScheduledValues(t);
+    activeChord.master.gain.setValueAtTime(Math.max(activeChord.master.gain.value, 0.0001), t);
+    activeChord.master.gain.exponentialRampToValueAtTime(0.0001, t + r);
+    activeChord.master.gain.linearRampToValueAtTime(0, t + r + 0.05);
+    activeChord.nodes.forEach((n) => { try { n.stop(t + r + 0.1); } catch (e) {} });
+  } catch (e) {}
+  activeChord = null;
+}
+
+// ---- Wire up buttons ----
+const HOVER_CHORD = [220.00, 329.63, 440.00, 554.37, 659.25];
+document.getElementById('playChord').addEventListener('click', () => playChord(HOVER_CHORD));
+document.getElementById('playNote').addEventListener('click', () => playChord([440]));
+document.getElementById('stop').addEventListener('click', stopChord);
+
+document.querySelectorAll('.preset').forEach((btn) => {
+  btn.addEventListener('click', (e) => {
+    const name = e.target.dataset.preset;
+    if (!PRESETS[name]) return;
+    state.harmonics = [...PRESETS[name]];
+    document.querySelectorAll('.harmonic input').forEach((input) => {
+      const idx = parseInt(input.dataset.idx);
+      input.value = state.harmonics[idx];
+      document.getElementById('hval-' + idx).textContent = state.harmonics[idx].toFixed(2);
+    });
+    updateOutput();
+  });
+});
+
+// ---- Output formatting ----
+function ordSuffix(n) {
+  if (n === 1) return '1st';
+  if (n === 2) return '2nd';
+  if (n === 3) return '3rd';
+  return n + 'th';
+}
+function updateOutput() {
+  const lines = [];
+  lines.push('// ─── HARMONIC SPECTRUM ───');
+  lines.push('const stringReal = new Float32Array([');
+  lines.push('  0,        // DC (must be zero)');
+  state.harmonics.forEach((v, i) => {
+    const ord = ordSuffix(i + 1);
+    const comma = i === HARMONIC_COUNT - 1 ? ' ' : ',';
+    const padded = v.toFixed(3);
+    lines.push('  ' + padded + comma + '   // ' + ord);
+  });
+  lines.push(']);');
+  lines.push('');
+  lines.push('// ─── FILTER ───');
+  lines.push('// start: ' + state.filterStart.toFixed(0) + ' Hz');
+  lines.push('// end:   ' + state.filterEnd.toFixed(0) + ' Hz');
+  lines.push('// Q:     ' + state.filterQ.toFixed(2));
+  lines.push('');
+  lines.push('// ─── ENVELOPE / VIBRATO ───');
+  lines.push('// attack:        ' + state.attack.toFixed(2) + ' sec');
+  lines.push('// vibrato depth: ' + state.vibratoDepth.toFixed(1) + ' cents');
+  lines.push('// vibrato rate:  ' + state.vibratoRate.toFixed(1) + ' Hz');
+  lines.push('// peak gain:     ' + state.peakGain.toFixed(3));
+  document.getElementById('output').textContent = lines.join('\n');
+}
+
+document.getElementById('copyOut').addEventListener('click', () => {
+  navigator.clipboard.writeText(document.getElementById('output').textContent).then(() => {
+    const btn = document.getElementById('copyOut');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  });
+});
+
+updateOutput();
+</script>
+</body>
+</html>
