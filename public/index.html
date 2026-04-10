@@ -58,7 +58,7 @@
     /* H logo nav dropdown */
     .wordmark-h-wrap { position: relative; display: inline-block; margin-bottom: 14px; }
     .wordmark-h { cursor: pointer; transition: box-shadow 0.2s; }
-    .wordmark-h:hover { box-shadow: 0 0 50px rgba(232,160,32,0.5), 0 0 90px rgba(45,212,191,0.25); }
+    .wordmark-h:hover { animation: hPulseFast 1.1s ease-in-out infinite; }
     .nav-dropdown {
       position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
       background: rgba(8,8,8,0.92); backdrop-filter: blur(12px);
@@ -239,10 +239,133 @@
     .wordmark-h {
       animation: hPulse 2.8s ease-in-out infinite;
     }
-    /* Pause pulse on hover so the hover glow takes over cleanly */
-    .wordmark-h:hover {
-      animation-play-state: paused;
+
+
+    /* ── EASTER EGG: faster H pulse on hover ── */
+    @keyframes hPulseFast {
+      0%, 100% {
+        box-shadow: 0 0 55px rgba(232,160,32,0.65), 0 0 100px rgba(45,212,191,0.35), 0 4px 32px rgba(0,0,0,0.6);
+        transform: scale(1);
+      }
+      50% {
+        box-shadow: 0 0 85px rgba(232,160,32,0.95), 0 0 145px rgba(45,212,191,0.6), 0 4px 40px rgba(0,0,0,0.6);
+        transform: scale(1.06);
+      }
     }
+    .wordmark-h:focus-visible {
+      outline: none;
+      box-shadow: 0 0 70px rgba(45,212,191,0.9), 0 0 120px rgba(232,160,32,0.5);
+    }
+
+    /* ── MANIFESTO OVERLAY ── */
+    .harmony-overlay {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(6,6,8,0.92);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.5s ease;
+    }
+    .harmony-overlay.open { opacity: 1; pointer-events: auto; }
+
+    .harmony-card {
+      text-align: center; padding: 60px 40px;
+      cursor: pointer; max-width: 90vw;
+      transform: translateY(20px);
+      transition: transform 0.6s ease, opacity 0.4s ease;
+    }
+    .harmony-overlay.open .harmony-card { transform: translateY(0); }
+    .harmony-overlay.bloom .harmony-card { opacity: 0; pointer-events: none; }
+
+    .harmony-line {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic; font-weight: 300;
+      font-size: clamp(40px, 7vw, 84px);
+      color: var(--white); line-height: 1.15;
+      letter-spacing: 0.005em;
+      animation: lineGlow 2.8s ease-in-out infinite;
+      user-select: none;
+    }
+    @keyframes lineGlow {
+      0%, 100% { text-shadow: 0 0 40px rgba(232,160,32,0.45), 0 4px 30px rgba(0,0,0,0.9); }
+      50%      { text-shadow: 0 0 70px rgba(232,160,32,0.8), 0 0 120px rgba(45,212,191,0.4), 0 4px 30px rgba(0,0,0,0.9); }
+    }
+
+    /* ── BLOOM STAGE ── */
+    .bloom-stage {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none;
+    }
+
+    .bloom-orb {
+      position: absolute; left: 50%; top: 50%;
+      width: 60px; height: 60px;
+      margin-left: -30px; margin-top: -30px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(232,160,32,1) 0%, rgba(232,160,32,0.55) 35%, rgba(45,212,191,0.2) 70%, transparent 100%);
+      box-shadow: 0 0 80px rgba(232,160,32,0.9), 0 0 160px rgba(45,212,191,0.55);
+      opacity: 0;
+      transform: scale(0.15);
+    }
+    .harmony-overlay.bloom .bloom-orb {
+      animation: orbBloom 1.7s ease-out forwards;
+    }
+    @keyframes orbBloom {
+      0%   { transform: scale(0.15); opacity: 0; }
+      15%  { transform: scale(1);    opacity: 1; }
+      55%  { opacity: 0.9; }
+      100% { transform: scale(9);    opacity: 0; }
+    }
+
+    .bloom-trace {
+      position: absolute;
+      left: calc(50% - 1px); top: 50%;
+      width: 2px; height: 0;
+      background: linear-gradient(to bottom, var(--teal) 0%, rgba(45,212,191,0.6) 40%, transparent 100%);
+      transform-origin: top center;
+      opacity: 0;
+    }
+    .harmony-overlay.bloom .bloom-trace {
+      animation: traceShoot 1.4s ease-out 0.18s forwards;
+    }
+    @keyframes traceShoot {
+      0%   { height: 0;       opacity: 0; }
+      15%  { opacity: 0.95; }
+      100% { height: 65vmax;  opacity: 0; }
+    }
+
+    .bloom-console {
+      position: absolute;
+      left: 50%; top: 60%;
+      transform: translateX(-50%);
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 13px; color: var(--teal); text-align: center;
+      letter-spacing: 0.06em;
+      text-shadow: 0 0 12px rgba(45,212,191,0.7);
+      width: max-content; max-width: 90vw;
+    }
+    .bloom-console p { opacity: 0; margin-top: 8px; }
+    .harmony-overlay.bloom .bloom-console p {
+      animation: lineFade 0.5s ease forwards;
+    }
+    .harmony-overlay.bloom .bloom-console p:nth-child(1) { animation-delay: 0.45s; }
+    .harmony-overlay.bloom .bloom-console p:nth-child(2) { animation-delay: 0.90s; }
+    .harmony-overlay.bloom .bloom-console p:nth-child(3) { animation-delay: 1.35s; }
+    @keyframes lineFade {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Reduced motion: keep the layout, kill the heavy animations */
+    @media (prefers-reduced-motion: reduce) {
+      .wordmark-h, .wordmark-h:hover, .harmony-line { animation: none; }
+      .harmony-overlay.bloom .bloom-orb,
+      .harmony-overlay.bloom .bloom-trace,
+      .harmony-overlay.bloom .bloom-console p { animation-duration: 0.01s; }
+    }
+
   </style>
 </head>
 <body>
@@ -257,11 +380,7 @@
 
   <div class="wordmark">
     <div class="wordmark-h-wrap">
-      <div class="wordmark-h" id="navTrigger">H</div>
-      <div class="nav-dropdown" id="navDropdown">
-        <a href="/" class="nav-item active">Home</a>
-        <a href="/architecture.html" class="nav-item">Architecture</a>
-      </div>
+      <div class="wordmark-h" id="harmonyEgg" role="button" tabindex="0" aria-label="Harmony">H</div>
     </div>
     <span class="wordmark-name">HARMONY AIO</span>
     <span class="wordmark-sub">AI Operations Orchestration</span>
@@ -357,14 +476,172 @@
       setTimeout(() => notif.classList.remove('show'), 3800);
     }
   }
-  // H logo nav toggle
-  const navTrigger = document.getElementById('navTrigger');
-  const navDropdown = document.getElementById('navDropdown');
-  navTrigger.addEventListener('click', (e) => {
-    e.stopPropagation();
-    navDropdown.classList.toggle('open');
+  // ── HARMONY EASTER EGG ──
+  // Soft synthesized chord on H hover, manifesto card on click,
+  // bloom + console transition into the architecture page.
+
+  let audioCtx = null;
+  let hoverSwell = null;
+  let clickSwell = null;
+
+  // The audio context can only initialize after a user gesture, otherwise the
+  // browser blocks autoplay.  We arm it on the first interaction of any kind.
+  function ensureAudio() {
+    if (audioCtx) {
+      if (audioCtx.state === 'suspended') {
+        try { audioCtx.resume(); } catch (e) { console.warn('audio resume failed', e); }
+      }
+      return audioCtx;
+    }
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      audioCtx = new AC();
+    } catch (e) {
+      console.warn('audio context unavailable', e);
+      return null;
+    }
+    return audioCtx;
+  }
+  ['pointerdown', 'mousemove', 'keydown', 'touchstart'].forEach((evt) => {
+    document.addEventListener(evt, ensureAudio, { once: true, passive: true });
   });
-  document.addEventListener('click', () => navDropdown.classList.remove('open'));
+
+  // playChord stacks detuned oscillators with a slow attack for an orchestral feel.
+  function playChord(frequencies, peakGain, attackSec) {
+    const ctx = ensureAudio();
+    if (!ctx) return null;
+    try {
+      const now = ctx.currentTime;
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0.0001, now);
+      master.gain.exponentialRampToValueAtTime(peakGain, now + attackSec);
+      master.connect(ctx.destination);
+
+      const oscs = frequencies.map((freq, i) => {
+        const osc = ctx.createOscillator();
+        // Triangle on the bass note adds warmth, sines on top stay clean
+        osc.type = i === 0 ? 'triangle' : 'sine';
+        osc.frequency.value = freq;
+        // Subtle detune so the chord breathes instead of sounding sterile
+        osc.detune.value = (i % 2 === 0) ? -4 : 4;
+        osc.connect(master);
+        osc.start(now);
+        return osc;
+      });
+
+      return {
+        stop(releaseSec) {
+          const t = ctx.currentTime;
+          const r = releaseSec || 0.6;
+          try {
+            master.gain.cancelScheduledValues(t);
+            master.gain.setValueAtTime(Math.max(master.gain.value, 0.0001), t);
+            master.gain.exponentialRampToValueAtTime(0.0001, t + r);
+            oscs.forEach((o) => o.stop(t + r + 0.05));
+          } catch (e) {
+            console.warn('chord stop failed', e);
+          }
+        }
+      };
+    } catch (e) {
+      console.warn('chord play failed', e);
+      return null;
+    }
+  }
+
+  // A major with octave doubling.  Click chord adds A4 for sparkle.
+  const HOVER_CHORD = [110.00, 164.81, 220.00, 277.18, 329.63];
+  const CLICK_CHORD = [110.00, 164.81, 220.00, 277.18, 329.63, 440.00];
+
+  const eggButton = document.getElementById('harmonyEgg');
+  const overlay = document.getElementById('harmonyOverlay');
+  const harmonyLine = document.getElementById('harmonyLine');
+
+  function openOverlay() {
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeOverlay() {
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    if (hoverSwell) { hoverSwell.stop(0.5); hoverSwell = null; }
+    if (clickSwell) { clickSwell.stop(0.3); clickSwell = null; }
+  }
+
+  // Hover the H: swell up, brighter pulse handled by CSS :hover
+  eggButton.addEventListener('mouseenter', () => {
+    if (hoverSwell) return;
+    hoverSwell = playChord(HOVER_CHORD, 0.06, 0.5);
+  });
+  eggButton.addEventListener('mouseleave', () => {
+    if (hoverSwell) { hoverSwell.stop(0.7); hoverSwell = null; }
+  });
+
+  // Click the H: stop the hover swell, open the manifesto card
+  eggButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (hoverSwell) { hoverSwell.stop(0.4); hoverSwell = null; }
+    openOverlay();
+  });
+  // Keyboard accessibility: Enter or Space on the focused H opens the card
+  eggButton.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openOverlay();
+    }
+  });
+
+  // Click the line: bigger swell, bloom, then navigate to architecture
+  harmonyLine.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (overlay.classList.contains('bloom')) return;
+    clickSwell = playChord(CLICK_CHORD, 0.13, 0.35);
+    overlay.classList.add('bloom');
+    setTimeout(() => {
+      if (clickSwell) { clickSwell.stop(0.45); clickSwell = null; }
+      window.location.href = '/architecture.html';
+    }, 2300);
+  });
+
+  // Click the dim background closes the overlay (only before bloom starts)
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay && !overlay.classList.contains('bloom')) {
+      closeOverlay();
+    }
+  });
+
+  // Escape closes the overlay before the bloom starts
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && overlay.classList.contains('open') && !overlay.classList.contains('bloom')) {
+      closeOverlay();
+    }
+  });
 </script>
+
+<div class="harmony-overlay" id="harmonyOverlay" aria-hidden="true">
+  <div class="harmony-card">
+    <p class="harmony-line" id="harmonyLine">Let&rsquo;s harmonize.</p>
+  </div>
+  <div class="bloom-stage">
+    <div class="bloom-orb"></div>
+    <div class="bloom-trace" style="transform: rotate(0deg);"></div>
+    <div class="bloom-trace" style="transform: rotate(45deg);"></div>
+    <div class="bloom-trace" style="transform: rotate(90deg);"></div>
+    <div class="bloom-trace" style="transform: rotate(135deg);"></div>
+    <div class="bloom-trace" style="transform: rotate(180deg);"></div>
+    <div class="bloom-trace" style="transform: rotate(225deg);"></div>
+    <div class="bloom-trace" style="transform: rotate(270deg);"></div>
+    <div class="bloom-trace" style="transform: rotate(315deg);"></div>
+    <div class="bloom-console">
+      <p>harmony parent online</p>
+      <p>child agents listening</p>
+      <p>rendering architecture overview</p>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

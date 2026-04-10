@@ -261,6 +261,7 @@
     /* H logo nav dropdown - same as index */
     .wordmark { position: relative; z-index: 2; margin-bottom: 28px; animation: fadeDown 1s ease both; }
     .wordmark-h-wrap { position: relative; display: inline-block; margin-bottom: 14px; }
+    .wordmark-h-link { display: inline-block; text-decoration: none; margin-bottom: 14px; }
     .wordmark-h { cursor: pointer; transition: box-shadow 0.2s; }
     .wordmark-h:hover { box-shadow: 0 0 50px rgba(232,160,32,0.5), 0 0 90px rgba(45,212,191,0.25); }
     .nav-dropdown {
@@ -346,13 +347,9 @@
   <div class="hero-bg"></div>
   <div class="hero-content">
     <div class="wordmark">
-      <div class="wordmark-h-wrap">
-        <div class="wordmark-h" id="navTrigger">H</div>
-        <div class="nav-dropdown" id="navDropdown">
-          <a href="/" class="nav-item">Home</a>
-          <a href="/architecture.html" class="nav-item active">Architecture</a>
-        </div>
-      </div>
+      <a href="/" class="wordmark-h-link" aria-label="Back to home">
+        <div class="wordmark-h">H</div>
+      </a>
       <span class="wordmark-name">HARMONY AIO</span>
       <span class="wordmark-sub">AI Operations Orchestration</span>
     </div>
@@ -495,13 +492,7 @@
 
 </div>
 <script>
-  const navTrigger = document.getElementById('navTrigger');
-  const navDropdown = document.getElementById('navDropdown');
-  navTrigger.addEventListener('click', (e) => {
-    e.stopPropagation();
-    navDropdown.classList.toggle('open');
-  });
-  document.addEventListener('click', () => navDropdown.classList.remove('open'));
+  // Nav is now a plain anchor link, no JS needed.
 </script>
 </body>
 </html>
