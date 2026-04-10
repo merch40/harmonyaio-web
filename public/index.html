@@ -489,10 +489,28 @@
   // the manifesto card instead of stopping when the cursor leaves the H.
   let interactionLocked = false;
 
+  // Sample buffer for the orchestral chord.  Loaded once on first interaction.
+  let chordBuffer = null;
+  let chordLoadPromise = null;
+
+  function loadChordSample(ctx) {
+    if (chordBuffer) return Promise.resolve(chordBuffer);
+    if (chordLoadPromise) return chordLoadPromise;
+    chordLoadPromise = fetch('/sounds/harmony-chord.mp3')
+      .then((r) => {
+        if (!r.ok) throw new Error('chord sample fetch failed: ' + r.status);
+        return r.arrayBuffer();
+      })
+      .then((buf) => ctx.decodeAudioData(buf))
+      .then((decoded) => { chordBuffer = decoded; return decoded; })
+      .catch((e) => { console.warn('chord sample load failed', e); chordLoadPromise = null; return null; });
+    return chordLoadPromise;
+  }
+
   // The audio context can only initialize after a user gesture, otherwise the
   // browser blocks autoplay.  We arm it on the first interaction of any kind,
-  // and immediately play 50ms of silence to warm up the audio path so the
-  // very first real chord does not get a buffer-start click pop.
+  // play 50ms of silence to warm up the audio path, and kick off the sample
+  // download in the background so it is decoded by the time the user hovers.
   function ensureAudio() {
     if (audioCtx) {
       if (audioCtx.state === 'suspended') {
@@ -512,6 +530,8 @@
       warmOsc.connect(warmGain);
       warmOsc.start(audioCtx.currentTime);
       warmOsc.stop(audioCtx.currentTime + 0.05);
+      // Kick off the sample load in the background
+      loadChordSample(audioCtx);
     } catch (e) {
       console.warn('audio context unavailable', e);
       return null;
@@ -522,42 +542,35 @@
     document.addEventListener(evt, ensureAudio, { once: true, passive: true });
   });
 
-  // playChord uses a custom PeriodicWave shaped like a bowed string spectrum
-  // (strong fundamental, prominent 2nd and 3rd, gradually decaying upper
-  // harmonics) through a gentle lowpass and a master compressor.  This sounds
-  // way more like an actual instrument than the sawtooth-and-sweep version it
-  // replaces, which read as 'synth pad' instead of 'string section'.
-  function playChord(frequencies, peakGain, attackSec) {
+  // playChord plays the loaded orchestral chord sample through a master
+  // envelope and compressor.  No more synthesis -- this is a real recording
+  // of an orchestra playing a C chord, looped so it sustains for as long as
+  // the interaction lasts.  Falls back silently if the sample is not loaded
+  // yet (which can happen if the user hovers within the first ~100ms before
+  // the fetch completes).
+  function playChord(peakGain, attackSec) {
     const ctx = ensureAudio();
     if (!ctx) return null;
+    if (!chordBuffer) {
+      // Sample is not decoded yet.  Try to play once it is, but only if the
+      // caller still holds the returned handle (this play is best-effort).
+      let cancelled = false;
+      const handle = {
+        stop() { cancelled = true; }
+      };
+      loadChordSample(ctx).then(() => {
+        if (cancelled || !chordBuffer) return;
+        const real = playChord(peakGain, attackSec);
+        if (real) {
+          handle.stop = real.stop.bind(real);
+        }
+      });
+      return handle;
+    }
     try {
       const now = ctx.currentTime;
 
-      // Fundamental-dominated harmonic series with rapid upper falloff.
-      // The previous spectrum had too much 4th-7th harmonic energy which read
-      // as brass.  This is much more bowed-string-shaped: strong fundamental,
-      // moderate 2nd, smaller 3rd, then a steep drop through the upper rows.
-      const stringReal = new Float32Array([
-        0,      // DC (must be zero)
-        1.0,    // 1st (fundamental, dominant)
-        0.5,    // 2nd (octave, half strength)
-        0.25,   // 3rd
-        0.13,   // 4th
-        0.08,   // 5th
-        0.05,   // 6th
-        0.035,  // 7th
-        0.022,  // 8th
-        0.015,  // 9th
-        0.01,   // 10th
-        0.008,  // 11th
-        0.006,  // 12th
-        0.004,  // 13th
-        0.003   // 14th
-      ]);
-      const stringImag = new Float32Array(stringReal.length);
-      const stringWave = ctx.createPeriodicWave(stringReal, stringImag);
-
-      // Master compressor catches any peaks (this is what kills the BOOM)
+      // Compressor catches any peaks
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -16;
       comp.knee.value = 8;
@@ -565,58 +578,22 @@
       comp.attack.value = 0.005;
       comp.release.value = 0.15;
 
-      // Master envelope: linear ramp from TRUE ZERO to a small value, then
-      // exponential up to peak.  Going from absolute silence with a linear
-      // pre-ramp prevents the first-sample click pop that exponential ramps
-      // starting from 0.0001 can produce on a fresh audio context.
+      // Master envelope: linear ramp from true zero, then exponential to peak
       const master = ctx.createGain();
       master.gain.setValueAtTime(0, now);
       master.gain.linearRampToValueAtTime(0.001, now + 0.02);
       master.gain.exponentialRampToValueAtTime(peakGain, now + attackSec);
 
-      // Gentle lowpass: low Q so no resonance ringing, opens slightly during attack
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.Q.value = 0.4;
-      filter.frequency.setValueAtTime(600, now);
-      filter.frequency.linearRampToValueAtTime(1700, now + attackSec * 1.2);
+      // BufferSource plays the loaded chord sample.  Loop so the chord
+      // sustains for as long as the interaction lasts.
+      const source = ctx.createBufferSource();
+      source.buffer = chordBuffer;
+      source.loop = true;
 
-      master.connect(filter);
-      filter.connect(comp);
+      source.connect(master);
+      master.connect(comp);
       comp.connect(ctx.destination);
-
-      const nodes = [];
-      frequencies.forEach((freq, i) => {
-        // Stagger voices slightly so the chord enters like a section, not a stab
-        const startTime = now + (i * 0.04);
-
-        // Single oscillator per voice using the string PeriodicWave.
-        // Cleaner than the super-saw approach and sounds less synthy.
-        const osc = ctx.createOscillator();
-        osc.setPeriodicWave(stringWave);
-        osc.frequency.value = freq;
-        osc.detune.value = (i % 2 === 0) ? -3 : 3;
-
-        // Per voice vibrato LFO at slightly different rates so they do not sync
-        const lfo = ctx.createOscillator();
-        const lfoDepth = ctx.createGain();
-        lfo.frequency.value = 4.3 + (i * 0.27);
-        lfoDepth.gain.value = 5;
-        lfo.connect(lfoDepth);
-        lfoDepth.connect(osc.detune);
-
-        // Per voice gain, normalized so adding more notes does not blow out
-        const voiceGain = ctx.createGain();
-        voiceGain.gain.value = 0.7 / Math.sqrt(frequencies.length);
-
-        osc.connect(voiceGain);
-        voiceGain.connect(master);
-
-        osc.start(startTime);
-        lfo.start(startTime);
-
-        nodes.push(osc, lfo);
-      });
+      source.start(now);
 
       return {
         stop(releaseSec) {
@@ -626,15 +603,8 @@
             master.gain.cancelScheduledValues(t);
             master.gain.setValueAtTime(Math.max(master.gain.value, 0.0001), t);
             master.gain.exponentialRampToValueAtTime(0.0001, t + r);
-            // Final linear pull to true zero so there is no click on stop
             master.gain.linearRampToValueAtTime(0, t + r + 0.05);
-            // Close the filter on release like a bow lifting
-            filter.frequency.cancelScheduledValues(t);
-            filter.frequency.setValueAtTime(filter.frequency.value, t);
-            filter.frequency.linearRampToValueAtTime(500, t + r);
-            nodes.forEach((n) => {
-              try { n.stop(t + r + 0.1); } catch (e) {}
-            });
+            try { source.stop(t + r + 0.1); } catch (e) {}
           } catch (e) {
             console.warn('chord stop failed', e);
           }
@@ -645,11 +615,6 @@
       return null;
     }
   }
-
-  // A major chord moved up an octave from the original to keep the bass note
-  // out of the boom/hum register.  Click chord adds A5 on top for sparkle.
-  const HOVER_CHORD = [220.00, 329.63, 440.00, 554.37, 659.25];
-  const CLICK_CHORD = [220.00, 329.63, 440.00, 554.37, 659.25, 880.00];
 
   const eggButton = document.getElementById('harmonyEgg');
   const overlay = document.getElementById('harmonyOverlay');
@@ -682,7 +647,7 @@
   // Hover the H: swell up, brighter pulse handled by CSS :hover
   eggButton.addEventListener('mouseenter', () => {
     if (hoverSwell) return;
-    hoverSwell = playChord(HOVER_CHORD, 0.05, 0.55);
+    hoverSwell = playChord(0.05, 0.55);
   });
   eggButton.addEventListener('mouseleave', () => {
     // Once locked in (after a click) the swell sustains regardless of cursor
@@ -696,7 +661,7 @@
     e.stopPropagation();
     interactionLocked = true;
     // If somehow the user got here without a hover swell (keyboard), start one
-    if (!hoverSwell) hoverSwell = playChord(HOVER_CHORD, 0.05, 0.55);
+    if (!hoverSwell) hoverSwell = playChord(0.05, 0.55);
     openOverlay();
   });
   // Keyboard accessibility: Enter or Space on the focused H opens the card
@@ -704,7 +669,7 @@
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       interactionLocked = true;
-      if (!hoverSwell) hoverSwell = playChord(HOVER_CHORD, 0.05, 0.55);
+      if (!hoverSwell) hoverSwell = playChord(0.05, 0.55);
       openOverlay();
     }
   });
@@ -775,7 +740,7 @@
     e.stopPropagation();
     if (overlay.classList.contains('typing') || overlay.classList.contains('bloom')) return;
     if (hoverSwell) { hoverSwell.stop(0.4); hoverSwell = null; }
-    clickSwell = playChord(CLICK_CHORD, 0.09, 0.45);
+    clickSwell = playChord(0.09, 0.45);
     overlay.classList.add('typing');
     // Wait for the card to fade out, then start typing the console lines
     setTimeout(typeConsoleLines, 480);
