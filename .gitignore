@@ -23,3 +23,6 @@ dist/
 _patch.py
 _patch_b64.txt
 _lucide.txt
+
+# Source audio files (keep out of /public, kept locally for re-encoding)
+audio-source/
