@@ -17,3 +17,9 @@ node_modules/
 # Build output if build step added later
 dist/
 .wrangler/
+
+# Local edit-pass scratch files (kept for rollback reference, not deployed)
+*.bak
+_patch.py
+_patch_b64.txt
+_lucide.txt
