@@ -620,13 +620,24 @@
   const overlay = document.getElementById('harmonyOverlay');
   const harmonyLine = document.getElementById('harmonyLine');
 
-  // Cache the original console text and immediately clear it.  Without this
-  // the lines flash visible for one frame when .typing is added (before the
-  // typing animation has had a chance to clear them itself).
+  // Cache the original console text and measure each line's natural width
+  // BEFORE clearing it.  We pin the bloom-console's min-width to the widest
+  // line so the container does not grow during typing.  Without this pin,
+  // the container's width: max-content combined with translate(-50%, -50%)
+  // centering causes it to expand outward from page center as line 1 types,
+  // which makes line 1 visually scroll in from the right while lines 2 and 3
+  // type normally left-to-right.  Clearing the text also prevents a one-frame
+  // flash of visible content when .typing is added.
+  const bloomConsoleEl = document.querySelector('.bloom-console');
+  let maxBloomLineWidth = 0;
   document.querySelectorAll('.bloom-console p').forEach((line) => {
     line.dataset.text = line.textContent;
+    if (line.offsetWidth > maxBloomLineWidth) maxBloomLineWidth = line.offsetWidth;
     line.textContent = '';
   });
+  if (bloomConsoleEl && maxBloomLineWidth > 0) {
+    bloomConsoleEl.style.minWidth = maxBloomLineWidth + 'px';
+  }
 
   function openOverlay() {
     overlay.classList.add('open');
