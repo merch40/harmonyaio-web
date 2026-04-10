@@ -647,7 +647,7 @@
   // Hover the H: swell up, brighter pulse handled by CSS :hover
   eggButton.addEventListener('mouseenter', () => {
     if (hoverSwell) return;
-    hoverSwell = playChord(0.05, 0.55);
+    hoverSwell = playChord(0.13, 0.55);
   });
   eggButton.addEventListener('mouseleave', () => {
     // Once locked in (after a click) the swell sustains regardless of cursor
@@ -661,7 +661,7 @@
     e.stopPropagation();
     interactionLocked = true;
     // If somehow the user got here without a hover swell (keyboard), start one
-    if (!hoverSwell) hoverSwell = playChord(0.05, 0.55);
+    if (!hoverSwell) hoverSwell = playChord(0.13, 0.55);
     openOverlay();
   });
   // Keyboard accessibility: Enter or Space on the focused H opens the card
@@ -669,7 +669,7 @@
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       interactionLocked = true;
-      if (!hoverSwell) hoverSwell = playChord(0.05, 0.55);
+      if (!hoverSwell) hoverSwell = playChord(0.13, 0.55);
       openOverlay();
     }
   });
@@ -740,7 +740,7 @@
     e.stopPropagation();
     if (overlay.classList.contains('typing') || overlay.classList.contains('bloom')) return;
     if (hoverSwell) { hoverSwell.stop(0.4); hoverSwell = null; }
-    clickSwell = playChord(0.09, 0.45);
+    clickSwell = playChord(0.22, 0.45);
     overlay.classList.add('typing');
     // Wait for the card to fade out, then start typing the console lines
     setTimeout(typeConsoleLines, 480);
