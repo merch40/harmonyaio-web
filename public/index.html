@@ -507,27 +507,68 @@
     document.addEventListener(evt, ensureAudio, { once: true, passive: true });
   });
 
-  // playChord stacks detuned oscillators with a slow attack for an orchestral feel.
+  // playChord builds a string pad style swell: stacked sawtooth pairs per voice
+  // through a lowpass filter that opens during the attack, plus subtle vibrato.
+  // Pure sine/triangle stacks sounded like an electric hum.  This is synth strings.
   function playChord(frequencies, peakGain, attackSec) {
     const ctx = ensureAudio();
     if (!ctx) return null;
     try {
       const now = ctx.currentTime;
+
+      // Master envelope: silence up to peak gain across the attack window
       const master = ctx.createGain();
       master.gain.setValueAtTime(0.0001, now);
       master.gain.exponentialRampToValueAtTime(peakGain, now + attackSec);
-      master.connect(ctx.destination);
 
-      const oscs = frequencies.map((freq, i) => {
-        const osc = ctx.createOscillator();
-        // Triangle on the bass note adds warmth, sines on top stay clean
-        osc.type = i === 0 ? 'triangle' : 'sine';
-        osc.frequency.value = freq;
-        // Subtle detune so the chord breathes instead of sounding sterile
-        osc.detune.value = (i % 2 === 0) ? -4 : 4;
-        osc.connect(master);
-        osc.start(now);
-        return osc;
+      // Lowpass filter that opens as the swell builds.  This is the trick that
+      // turns raw sawtooths into something that reads as orchestral.
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.value = 1.1;
+      filter.frequency.setValueAtTime(360, now);
+      filter.frequency.exponentialRampToValueAtTime(2600, now + attackSec * 1.4);
+
+      master.connect(filter);
+      filter.connect(ctx.destination);
+
+      const nodes = [];
+      frequencies.forEach((freq, i) => {
+        // Stagger voices slightly so they enter like a section, not a stab
+        const startTime = now + (i * 0.025);
+
+        // Two slightly detuned sawtooths per note for chorus / super saw warmth
+        const oscA = ctx.createOscillator();
+        const oscB = ctx.createOscillator();
+        oscA.type = 'sawtooth';
+        oscB.type = 'sawtooth';
+        oscA.frequency.value = freq;
+        oscB.frequency.value = freq;
+        oscA.detune.value = -7;
+        oscB.detune.value = 7;
+
+        // Per voice vibrato LFO at slightly different rates so they do not sync
+        const lfo = ctx.createOscillator();
+        const lfoDepth = ctx.createGain();
+        lfo.frequency.value = 4.6 + (i * 0.31);
+        lfoDepth.gain.value = 4; // about 4 cents of pitch wobble
+        lfo.connect(lfoDepth);
+        lfoDepth.connect(oscA.detune);
+        lfoDepth.connect(oscB.detune);
+
+        // Per voice gain, normalized so adding more notes does not blow out
+        const voiceGain = ctx.createGain();
+        voiceGain.gain.value = 0.85 / Math.sqrt(frequencies.length);
+
+        oscA.connect(voiceGain);
+        oscB.connect(voiceGain);
+        voiceGain.connect(master);
+
+        oscA.start(startTime);
+        oscB.start(startTime);
+        lfo.start(startTime);
+
+        nodes.push(oscA, oscB, lfo);
       });
 
       return {
@@ -538,7 +579,13 @@
             master.gain.cancelScheduledValues(t);
             master.gain.setValueAtTime(Math.max(master.gain.value, 0.0001), t);
             master.gain.exponentialRampToValueAtTime(0.0001, t + r);
-            oscs.forEach((o) => o.stop(t + r + 0.05));
+            // Close the filter on release for a natural fade, like a bow lifting
+            filter.frequency.cancelScheduledValues(t);
+            filter.frequency.setValueAtTime(filter.frequency.value, t);
+            filter.frequency.exponentialRampToValueAtTime(400, t + r);
+            nodes.forEach((n) => {
+              try { n.stop(t + r + 0.08); } catch (e) {}
+            });
           } catch (e) {
             console.warn('chord stop failed', e);
           }
@@ -574,7 +621,7 @@
   // Hover the H: swell up, brighter pulse handled by CSS :hover
   eggButton.addEventListener('mouseenter', () => {
     if (hoverSwell) return;
-    hoverSwell = playChord(HOVER_CHORD, 0.06, 0.5);
+    hoverSwell = playChord(HOVER_CHORD, 0.05, 0.55);
   });
   eggButton.addEventListener('mouseleave', () => {
     if (hoverSwell) { hoverSwell.stop(0.7); hoverSwell = null; }
@@ -598,7 +645,7 @@
   harmonyLine.addEventListener('click', (e) => {
     e.stopPropagation();
     if (overlay.classList.contains('bloom')) return;
-    clickSwell = playChord(CLICK_CHORD, 0.13, 0.35);
+    clickSwell = playChord(CLICK_CHORD, 0.10, 0.4);
     overlay.classList.add('bloom');
     setTimeout(() => {
       if (clickSwell) { clickSwell.stop(0.45); clickSwell = null; }
