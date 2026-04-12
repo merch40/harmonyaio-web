@@ -770,6 +770,15 @@
       closeOverlay();
     }
   });
+
+  // If the user navigates away during the bloom sequence (e.g. to the
+  // architecture page) and then comes back -- either via a fresh load or via
+  // the browser's back-forward cache -- the overlay would otherwise still be
+  // showing the final bloom/typing state with no way out.  Reset it on every
+  // pageshow so the landing page always starts clean.
+  window.addEventListener('pageshow', () => {
+    closeOverlay();
+  });
 </script>
 
 </body>
