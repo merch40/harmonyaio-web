@@ -57,6 +57,7 @@ export const SAMPLE_LICENSE_ROW: LicenseRow = {
   packs: null,
   issued_to_org: "Professional Advantage",
   contact_email: "beau@professionaladvantage.com",
+  company_id: null,
   issued_at: "2026-05-01T00:00:00Z",
   expires_at: null,
   revoked_at: null,

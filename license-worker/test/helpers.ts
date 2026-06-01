@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS licenses (
   packs          TEXT,
   issued_to_org  TEXT NOT NULL,
   contact_email  TEXT NOT NULL,
+  company_id     TEXT,
   issued_at      TEXT NOT NULL,
   expires_at     TEXT,
   revoked_at     TEXT,

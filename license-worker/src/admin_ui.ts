@@ -102,8 +102,16 @@ const PAGE = `<!doctype html>
   .modal-row .v { text-align:right; word-break:break-all; }
   .modal-row .v code { font-family:'Courier New',monospace; color:var(--teal); }
   .modal-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:18px; }
-  .modal-actions .crm { background:rgba(224,80,64,0.14); color:#e05040; border:1px solid rgba(224,80,64,0.45); }
-  .modal-actions .crm:hover { background:rgba(224,80,64,0.22); border-color:#e05040; color:#e05040; cursor:help; }
+  button.crm { background:rgba(224,80,64,0.14); color:#e05040; border:1px solid rgba(224,80,64,0.45); }
+  button.crm:hover { background:rgba(224,80,64,0.22); border-color:#e05040; color:#e05040; cursor:help; }
+
+  /* settings: CRM integration (placeholder) */
+  .settings-sub h3 { font-family:'Cinzel',serif; font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; margin:0 0 8px; color:var(--white); }
+  .map-preview { margin:16px 0 0; border:1px solid var(--card-border); border-radius:8px; overflow:hidden; }
+  .map-preview .map-head { font-size:9px; letter-spacing:0.16em; text-transform:uppercase; color:var(--dim); padding:9px 12px; background:rgba(240,237,232,0.03); }
+  .map-row { display:flex; justify-content:space-between; gap:12px; padding:8px 12px; font-size:12px; border-top:1px solid var(--card-border); }
+  .map-row .src { color:var(--white); }
+  .map-row .dst { color:var(--teal); font-family:'Courier New',monospace; }
 </style>
 </head>
 <body>
@@ -151,6 +159,9 @@ const PAGE = `<!doctype html>
       <label>Contact email
         <input id="email" type="email" placeholder="admin@acme.com" required>
       </label>
+      <label>Company ID (optional)
+        <input id="companyId" placeholder="CRM / DebtorID">
+      </label>
       <label id="expiresWrap" hidden>Expiry date
         <input id="expires" type="date">
       </label>
@@ -181,20 +192,36 @@ const PAGE = `<!doctype html>
       <tbody id="licenseBody"></tbody>
     </table>
   </section>
+
+  <section id="settingsCard" class="card accent" hidden>
+    <h2>License Administration Settings</h2>
+    <div class="settings-sub">
+      <h3>CRM Integration</h3>
+      <p class="muted">Connect to Dynamics 365 to sync issued licenses to CRM records. When live, you will map license fields to CRM fields here.</p>
+      <!-- TODO: wire "Connect to CRM" to Dynamics 365 (D365). On connect, sync each
+           license to a CRM record using the field map below, then link back. -->
+      <button id="crmBtn" type="button" class="crm" title="Coming Soon" aria-disabled="true">Connect to CRM</button>
+      <div class="map-preview">
+        <div class="map-head">Planned field mapping (configurable when the connector ships)</div>
+        <div class="map-row"><span class="src">Organization</span><span class="dst">Company Name</span></div>
+        <div class="map-row"><span class="src">Company ID</span><span class="dst">DebtorID</span></div>
+        <div class="map-row"><span class="src">Contact email</span><span class="dst">Primary Contact</span></div>
+        <div class="map-row"><span class="src">Tier &amp; packs</span><span class="dst">Product / Subscription</span></div>
+        <div class="map-row"><span class="src">Expires</span><span class="dst">Renewal Date</span></div>
+        <div class="map-row"><span class="src">Status / Binding</span><span class="dst">License Status</span></div>
+      </div>
+    </div>
+  </section>
 </div>
 
 <div id="detailOverlay" class="modal-overlay" hidden>
   <div class="modal">
     <h3>License detail</h3>
     <div id="detailBody"></div>
-    <!-- TODO: wire "Connect to CRM" to Dynamics 365 (D365) CRM. Sync this
-         license (key, tier, org, contact, packs, expiry, status) to a CRM
-         record and link back. Currently a Coming Soon placeholder. -->
     <div class="modal-actions">
       <button id="forceReleaseBtn" type="button" class="ghost">Release</button>
       <button id="detailRevokeBtn" type="button" class="ghost">Revoke</button>
       <button id="detailRemoveBtn" type="button" class="ghost danger">Remove</button>
-      <button id="crmBtn" type="button" class="crm" title="Coming Soon" aria-disabled="true">Connect to CRM</button>
       <button id="detailCopyBtn" type="button" class="ghost">Copy key</button>
       <button id="detailCloseBtn" type="button" class="ghost">Close</button>
     </div>
@@ -226,6 +253,7 @@ const PAGE = `<!doctype html>
       show($('loginCard'), !authed);
       show($('issueCard'), authed);
       show($('listCard'), authed);
+      show($('settingsCard'), authed);
       show($('logoutBtn'), authed);
       if (authed) loadList();
     });
@@ -325,6 +353,8 @@ const PAGE = `<!doctype html>
     } else {
       payload.term = term;
     }
+    var cid = $('companyId').value.trim();
+    if (cid) payload.company_id = cid;
     var notes = $('notes').value.trim();
     if (notes) payload.notes = notes;
     api('/admin/license', {
@@ -396,6 +426,7 @@ const PAGE = `<!doctype html>
     b.appendChild(modalRow('License key', l.license_key, true));
     b.appendChild(modalRow('Tier', l.tier));
     b.appendChild(modalRow('Organization', l.issued_to_org));
+    b.appendChild(modalRow('Company ID', l.company_id || 'not set'));
     b.appendChild(modalRow('Contact email', l.contact_email || ''));
     b.appendChild(modalRow('Endpoint packs', formatPacks(l.packs)));
     b.appendChild(modalRow('Issued', (l.issued_at || '').slice(0, 10)));

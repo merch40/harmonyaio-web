@@ -10,6 +10,7 @@ interface AdminIssueRequest {
   packs?: Pack[];
   issued_to_org?: string;
   contact_email?: string;
+  company_id?: string;
   term?: "perpetual" | "monthly" | "annual";
   expires_at?: string | null; // explicit custom date; wins over term
   license_key?: string;
@@ -88,8 +89,8 @@ export async function handleAdminIssue(req: Request, env: Env): Promise<Response
 
   try {
     await env.DB.prepare(
-      `INSERT INTO licenses (license_key, tier, pack_size, packs, issued_to_org, contact_email, issued_at, expires_at, notes)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+      `INSERT INTO licenses (license_key, tier, pack_size, packs, issued_to_org, contact_email, company_id, issued_at, expires_at, notes)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
     )
       .bind(
         key,
@@ -98,6 +99,7 @@ export async function handleAdminIssue(req: Request, env: Env): Promise<Response
         packsJSON,
         body.issued_to_org,
         body.contact_email,
+        body.company_id?.trim() || null,
         nowISO(),
         expiresAt,
         body.notes ?? null,
@@ -113,6 +115,7 @@ export async function handleAdminIssue(req: Request, env: Env): Promise<Response
     packs,
     pack_endpoints: packEndpointTotal,
     expires_at: expiresAt,
+    company_id: body.company_id?.trim() || null,
   });
 }
 
@@ -123,6 +126,7 @@ interface LicenseListRow {
   packs: string | null;
   issued_to_org: string;
   contact_email: string;
+  company_id: string | null;
   issued_at: string;
   expires_at: string | null;
   revoked_at: string | null;
@@ -134,7 +138,7 @@ interface LicenseListRow {
 export async function handleAdminLicensesList(req: Request, env: Env): Promise<Response> {
   await requireAdminAuth(req, env);
   const { results } = await env.DB.prepare(
-    `SELECT l.license_key, l.tier, l.pack_size, l.packs, l.issued_to_org, l.contact_email,
+    `SELECT l.license_key, l.tier, l.pack_size, l.packs, l.issued_to_org, l.contact_email, l.company_id,
             l.issued_at, l.expires_at, l.revoked_at,
             (SELECT COUNT(*) FROM instances i
               WHERE i.license_key = l.license_key AND i.released_at IS NULL) AS active_instances

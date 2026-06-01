@@ -54,6 +54,7 @@ export interface LicenseRow {
   packs: string | null; // JSON array of Pack ({size, qty}); null = no packs
   issued_to_org: string;
   contact_email: string;
+  company_id: string | null; // external CRM/accounting id (e.g. DebtorID); metadata only
   issued_at: string;
   expires_at: string | null;
   revoked_at: string | null;

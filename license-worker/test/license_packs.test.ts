@@ -262,3 +262,23 @@ describe("subscription term", () => {
     expect(body.expires_at).toBeNull();
   });
 });
+
+describe("company id", () => {
+  it("stores and returns the company id", async () => {
+    const r = await issue(cookie, {
+      tier: "business",
+      issued_to_org: "Acct Co",
+      contact_email: "a@acct.example",
+      company_id: "DEBTOR-12345",
+    });
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { company_id: string | null }).company_id).toBe("DEBTOR-12345");
+
+    const list = await SELF.fetch("https://license.test/admin/licenses", { headers: { cookie } });
+    const body = (await list.json()) as {
+      licenses: Array<{ issued_to_org: string; company_id: string | null }>;
+    };
+    const row = body.licenses.find((l) => l.issued_to_org === "Acct Co");
+    expect(row?.company_id).toBe("DEBTOR-12345");
+  });
+});
