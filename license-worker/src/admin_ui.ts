@@ -4,7 +4,10 @@
 // warm white text, the H wordmark as the single glow, gradient only on the
 // wordmark and a thin card top-accent, no red (reserved for the security band).
 // The inline script uses string concatenation (no template literals / ${}) so it
-// nests cleanly inside this TS template literal.
+// nests cleanly inside this TS template literal. CAUTION: do not use escape
+// sequences like \n in inner JS strings here -- inside this outer template literal
+// they expand to real characters at build time, and a literal newline splits a JS
+// string -> SyntaxError that blanks the entire page. Keep dialog text on one line.
 
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -450,7 +453,7 @@ const PAGE = `<!doctype html>
   });
   $('forceReleaseBtn').addEventListener('click', function () {
     if (!detailKey) return;
-    if (!confirm('Force-release the active binding for ' + detailKey + '?\n\nThe key is unbound from its current server so it can activate on a new one. Use this for migrations or after wiping a server.')) return;
+    if (!confirm('Force-release the active binding for ' + detailKey + '? It is unbound from its current server so it can activate on a new one. Use this for migrations or after wiping a server.')) return;
     api('/admin/license/force-release', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
