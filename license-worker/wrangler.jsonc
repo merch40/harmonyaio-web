@@ -1,0 +1,23 @@
+{
+  // harmony-license-worker — Cloudflare Worker + D1
+  // Custom domain 'license.harmonyaio.com' is bound manually in the
+  // Cloudflare dashboard (Workers > Triggers > Add custom domain).
+  //
+  // Secrets must be configured before first deploy:
+  //   wrangler secret put HARMONY_LICENSE_SIGNING_KEY_V1
+  //   wrangler secret put SESSION_SECRET
+  //   wrangler secret put ADMIN_SECRET
+  //   wrangler secret put BREVO_API_KEY (deferred)
+
+  "name": "harmony-license-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "harmony-license",
+      "database_id": "91c70e40-7019-495e-99f4-ce1e0f98acff"
+    }
+  ]
+}
