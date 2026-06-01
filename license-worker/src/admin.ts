@@ -10,7 +10,8 @@ interface AdminIssueRequest {
   packs?: Pack[];
   issued_to_org?: string;
   contact_email?: string;
-  expires_at?: string | null;
+  term?: "perpetual" | "monthly" | "annual";
+  expires_at?: string | null; // explicit custom date; wins over term
   license_key?: string;
   notes?: string;
 }
@@ -74,6 +75,17 @@ export async function handleAdminIssue(req: Request, env: Env): Promise<Response
 
   const key = body.license_key ?? generateLicenseKey(body.tier);
 
+  // Subscription term -> expiry (the period end). An explicit custom date wins;
+  // otherwise compute from the term. Perpetual / unset leaves expiry null.
+  let expiresAt: string | null = null;
+  if (body.expires_at) {
+    expiresAt = body.expires_at;
+  } else if (body.term === "monthly") {
+    expiresAt = addMonthsISO(1);
+  } else if (body.term === "annual") {
+    expiresAt = addMonthsISO(12);
+  }
+
   try {
     await env.DB.prepare(
       `INSERT INTO licenses (license_key, tier, pack_size, packs, issued_to_org, contact_email, issued_at, expires_at, notes)
@@ -87,7 +99,7 @@ export async function handleAdminIssue(req: Request, env: Env): Promise<Response
         body.issued_to_org,
         body.contact_email,
         nowISO(),
-        body.expires_at ?? null,
+        expiresAt,
         body.notes ?? null,
       )
       .run();
@@ -100,6 +112,7 @@ export async function handleAdminIssue(req: Request, env: Env): Promise<Response
     tier: body.tier,
     packs,
     pack_endpoints: packEndpointTotal,
+    expires_at: expiresAt,
   });
 }
 
@@ -189,6 +202,21 @@ export async function handleAdminLogout(_req: Request, _env: Env): Promise<Respo
     status: 200,
     headers: { "content-type": "application/json", "set-cookie": clearSessionCookie() },
   });
+}
+
+// addMonthsISO returns now + n calendar months (UTC, second precision), clamped
+// to the last valid day of the target month (e.g. Jan 31 + 1 month -> Feb 28).
+// This is the exclusive subscription period end; a license is valid while
+// now < expires_at, so a monthly term bought on the 1st runs through the end of
+// the month and lapses on the same day next month.
+function addMonthsISO(months: number): string {
+  const d = new Date();
+  const day = d.getUTCDate();
+  d.setUTCDate(1); // avoid day-overflow while shifting the month
+  d.setUTCMonth(d.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, lastDay));
+  return d.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 function generateLicenseKey(tier: Tier): string {

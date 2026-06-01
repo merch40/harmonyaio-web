@@ -209,3 +209,29 @@ describe("revoke and remove", () => {
     expect(rm.status).toBe(401);
   });
 });
+
+describe("subscription term", () => {
+  it("monthly term sets expires_at about a month out", async () => {
+    const r = await issue(cookie, { tier: "professional", term: "monthly", issued_to_org: "Mo", contact_email: "m@x.example" });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { expires_at: string | null };
+    expect(body.expires_at).toBeTruthy();
+    const days = (Date.parse(body.expires_at as string) - Date.now()) / 86400000;
+    expect(days).toBeGreaterThan(26);
+    expect(days).toBeLessThan(33);
+  });
+
+  it("annual term sets expires_at about a year out", async () => {
+    const r = await issue(cookie, { tier: "business", term: "annual", issued_to_org: "Yr", contact_email: "y@x.example" });
+    const body = (await r.json()) as { expires_at: string };
+    const days = (Date.parse(body.expires_at) - Date.now()) / 86400000;
+    expect(days).toBeGreaterThan(360);
+    expect(days).toBeLessThan(372);
+  });
+
+  it("perpetual term leaves expires_at null", async () => {
+    const r = await issue(cookie, { tier: "business", term: "perpetual", issued_to_org: "Pp", contact_email: "p@x.example" });
+    const body = (await r.json()) as { expires_at: string | null };
+    expect(body.expires_at).toBeNull();
+  });
+});

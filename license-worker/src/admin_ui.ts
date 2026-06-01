@@ -23,7 +23,7 @@ const PAGE = `<!doctype html>
   }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--ink); color:var(--white); font-family:'DM Sans',system-ui,sans-serif; font-weight:400; -webkit-font-smoothing:antialiased; }
-  .wrap { position:relative; max-width:980px; margin:0 auto; padding:48px 20px 80px; }
+  .wrap { position:relative; max-width:1180px; margin:0 auto; padding:48px 20px 80px; }
 
   .brand { text-align:center; margin-bottom:36px; }
   .wordmark-h {
@@ -47,6 +47,7 @@ const PAGE = `<!doctype html>
   .card { position:relative; background:var(--card); border:1px solid var(--card-border); border-radius:14px; padding:26px; margin:0 auto 20px; max-width:760px; }
   .card.accent::before { content:""; position:absolute; top:0; left:0; right:0; height:2px; border-radius:14px 14px 0 0; background:linear-gradient(135deg,var(--amber),var(--teal)); }
   #loginCard { max-width:420px; }
+  #listCard { max-width:100%; }
 
   h2 { font-family:'Cinzel',serif; font-weight:600; font-size:14px; letter-spacing:0.06em; text-transform:uppercase; margin:0 0 16px; display:flex; align-items:center; gap:12px; }
   .muted { color:var(--dim); font-size:13px; margin:0 0 14px; }
@@ -80,14 +81,26 @@ const PAGE = `<!doctype html>
   #keyValue { font-family:'Courier New',monospace; font-size:18px; letter-spacing:0.06em; color:var(--teal); }
 
   table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--card-border); vertical-align:middle; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--card-border); vertical-align:middle; }
   th { font-family:'Cinzel',serif; font-weight:400; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--teal); }
-  td code { font-family:'Courier New',monospace; color:var(--amber); }
+  td.actions { white-space:nowrap; }
   td button.ghost { font-size:9px; padding:4px 9px; margin-right:6px; }
   tr.revoked td { opacity:0.55; }
   .pill { font-size:9px; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; padding:3px 9px; border-radius:999px; white-space:nowrap; }
   .pill.active { color:var(--teal); background:var(--teal-dim); border:1px solid var(--teal-border); }
   .pill.revoked { color:var(--dim); background:rgba(240,237,232,0.04); border:1px solid rgba(240,237,232,0.18); }
+
+  /* detail modal */
+  .modal-overlay { position:fixed; inset:0; z-index:5000; background:rgba(0,0,0,0.66); display:flex; align-items:center; justify-content:center; padding:20px; }
+  .modal-overlay[hidden] { display:none; }
+  .modal { position:relative; background:var(--card); border:1px solid var(--card-border); border-radius:14px; padding:24px 26px; width:560px; max-width:100%; }
+  .modal::before { content:""; position:absolute; top:0; left:0; right:0; height:2px; border-radius:14px 14px 0 0; background:linear-gradient(135deg,var(--amber),var(--teal)); }
+  .modal h3 { font-family:'Cinzel',serif; font-weight:600; font-size:14px; letter-spacing:0.06em; text-transform:uppercase; margin:0 0 14px; }
+  .modal-row { display:flex; justify-content:space-between; gap:18px; padding:9px 0; border-bottom:1px solid var(--card-border); font-size:13px; }
+  .modal-row .k { color:var(--dim); text-transform:uppercase; letter-spacing:0.08em; font-size:10px; align-self:center; white-space:nowrap; }
+  .modal-row .v { text-align:right; word-break:break-all; }
+  .modal-row .v code { font-family:'Courier New',monospace; color:var(--teal); }
+  .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
 </style>
 </head>
 <body>
@@ -121,13 +134,21 @@ const PAGE = `<!doctype html>
           <option value="enterprise">Enterprise</option>
         </select>
       </label>
+      <label>Term
+        <select id="term">
+          <option value="perpetual" selected>Perpetual</option>
+          <option value="monthly">Monthly</option>
+          <option value="annual">Annual</option>
+          <option value="custom">Custom date</option>
+        </select>
+      </label>
       <label>Organization
         <input id="org" placeholder="Acme Corp" required>
       </label>
       <label>Contact email
         <input id="email" type="email" placeholder="admin@acme.com" required>
       </label>
-      <label>Expires (optional)
+      <label id="expiresWrap" hidden>Expiry date
         <input id="expires" type="date">
       </label>
       <label class="full">Notes (optional)
@@ -153,10 +174,21 @@ const PAGE = `<!doctype html>
   <section id="listCard" class="card" hidden>
     <h2>Issued licenses <button id="refreshBtn" type="button" class="ghost">Refresh</button></h2>
     <table>
-      <thead><tr><th>Key</th><th>Tier</th><th>Organization</th><th>Active</th><th>Packs</th><th>Issued</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Tier</th><th>Organization</th><th>Active</th><th>Packs</th><th>Issued</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody id="licenseBody"></tbody>
     </table>
   </section>
+</div>
+
+<div id="detailOverlay" class="modal-overlay" hidden>
+  <div class="modal">
+    <h3>License detail</h3>
+    <div id="detailBody"></div>
+    <div class="modal-actions">
+      <button id="detailCopyBtn" type="button" class="ghost">Copy key</button>
+      <button id="detailCloseBtn" type="button" class="ghost">Close</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -260,6 +292,9 @@ const PAGE = `<!doctype html>
   function syncPack() { show($('packWrap'), $('tier').value !== 'enterprise'); }
   $('tier').addEventListener('change', syncPack);
 
+  function syncTerm() { show($('expiresWrap'), $('term').value === 'custom'); }
+  $('term').addEventListener('change', syncTerm);
+
   $('issueForm').addEventListener('submit', function (e) {
     e.preventDefault();
     $('issueErr').textContent = '';
@@ -273,8 +308,13 @@ const PAGE = `<!doctype html>
       var packs = gatherPacks();
       if (packs.length > 0) payload.packs = packs;
     }
-    var exp = $('expires').value;
-    if (exp) payload.expires_at = exp + 'T00:00:00Z';
+    var term = $('term').value;
+    if (term === 'custom') {
+      var exp = $('expires').value;
+      if (exp) payload.expires_at = exp + 'T00:00:00Z';
+    } else {
+      payload.term = term;
+    }
     var notes = $('notes').value.trim();
     if (notes) payload.notes = notes;
     api('/admin/license', {
@@ -316,6 +356,53 @@ const PAGE = `<!doctype html>
     }).then(loadList).catch(function (err) { alert(err.message); });
   }
 
+  // ---- detail modal ----
+  var detailKey = '';
+  function modalRow(k, v, isCode) {
+    var row = document.createElement('div');
+    row.className = 'modal-row';
+    var kk = document.createElement('span');
+    kk.className = 'k';
+    kk.textContent = k;
+    var vv = document.createElement('span');
+    vv.className = 'v';
+    if (isCode) {
+      var c = document.createElement('code');
+      c.textContent = v;
+      vv.appendChild(c);
+    } else {
+      vv.textContent = v;
+    }
+    row.appendChild(kk);
+    row.appendChild(vv);
+    return row;
+  }
+  function showDetail(l) {
+    detailKey = l.license_key;
+    var b = $('detailBody');
+    b.innerHTML = '';
+    b.appendChild(modalRow('License key', l.license_key, true));
+    b.appendChild(modalRow('Tier', l.tier));
+    b.appendChild(modalRow('Organization', l.issued_to_org));
+    b.appendChild(modalRow('Contact email', l.contact_email || ''));
+    b.appendChild(modalRow('Endpoint packs', formatPacks(l.packs)));
+    b.appendChild(modalRow('Issued', (l.issued_at || '').slice(0, 10)));
+    b.appendChild(modalRow('Expires', l.expires_at ? l.expires_at.slice(0, 10) : 'perpetual'));
+    b.appendChild(modalRow('Active instances', String(l.active_instances)));
+    b.appendChild(modalRow('Status', l.revoked_at ? 'revoked' : 'active'));
+    show($('detailOverlay'), true);
+  }
+  $('detailCloseBtn').addEventListener('click', function () { show($('detailOverlay'), false); });
+  $('detailOverlay').addEventListener('click', function (e) {
+    if (e.target === $('detailOverlay')) show($('detailOverlay'), false);
+  });
+  $('detailCopyBtn').addEventListener('click', function () {
+    navigator.clipboard.writeText(detailKey).then(function () {
+      $('detailCopyBtn').textContent = 'Copied';
+      setTimeout(function () { $('detailCopyBtn').textContent = 'Copy key'; }, 1500);
+    });
+  });
+
   function cell(text) {
     var td = document.createElement('td');
     td.textContent = (text === null || text === undefined) ? '' : String(text);
@@ -337,11 +424,6 @@ const PAGE = `<!doctype html>
       (d.licenses || []).forEach(function (l) {
         var tr = document.createElement('tr');
         if (l.revoked_at) tr.className = 'revoked';
-        var keyTd = document.createElement('td');
-        var code = document.createElement('code');
-        code.textContent = l.license_key;
-        keyTd.appendChild(code);
-        tr.appendChild(keyTd);
         tr.appendChild(cell(l.tier));
         tr.appendChild(cell(l.issued_to_org));
         tr.appendChild(cell(l.active_instances));
@@ -355,6 +437,13 @@ const PAGE = `<!doctype html>
         statusTd.appendChild(pill);
         tr.appendChild(statusTd);
         var actTd = document.createElement('td');
+        actTd.className = 'actions';
+        var det = document.createElement('button');
+        det.type = 'button';
+        det.className = 'ghost';
+        det.textContent = 'Detail';
+        det.addEventListener('click', function () { showDetail(l); });
+        actTd.appendChild(det);
         if (!l.revoked_at) {
           var rev = document.createElement('button');
           rev.type = 'button';
@@ -376,6 +465,7 @@ const PAGE = `<!doctype html>
   }
 
   syncPack();
+  syncTerm();
   refreshAuth();
 })();
 </script>
