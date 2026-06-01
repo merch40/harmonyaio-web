@@ -54,6 +54,7 @@ export const SAMPLE_LICENSE_ROW: LicenseRow = {
   license_key: "HRM-PRO-PA00-DOGF-OOD1",
   tier: "professional",
   pack_size: 100,
+  packs: null,
   issued_to_org: "Professional Advantage",
   contact_email: "beau@professionaladvantage.com",
   issued_at: "2026-05-01T00:00:00Z",

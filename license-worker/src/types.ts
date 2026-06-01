@@ -3,6 +3,13 @@
 
 export type Tier = "home" | "business" | "professional" | "enterprise";
 
+// A purchased endpoint pack: `size` managed endpoints (plus 5x that in device
+// inventory) times `qty` units. A license can hold any mix of packs.
+export interface Pack {
+  size: number;
+  qty: number;
+}
+
 export interface IssuedTo {
   org_name: string;
   contact_email: string;
@@ -44,6 +51,7 @@ export interface LicenseRow {
   license_key: string;
   tier: Tier;
   pack_size: number;
+  packs: string | null; // JSON array of Pack ({size, qty}); null = no packs
   issued_to_org: string;
   contact_email: string;
   issued_at: string;

@@ -23,7 +23,7 @@ const PAGE = `<!doctype html>
   }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--ink); color:var(--white); font-family:'DM Sans',system-ui,sans-serif; font-weight:400; -webkit-font-smoothing:antialiased; }
-  .wrap { position:relative; max-width:880px; margin:0 auto; padding:48px 20px 80px; }
+  .wrap { position:relative; max-width:980px; margin:0 auto; padding:48px 20px 80px; }
 
   .brand { text-align:center; margin-bottom:36px; }
   .wordmark-h {
@@ -44,8 +44,7 @@ const PAGE = `<!doctype html>
   .wordmark-desc { font-size:12px; color:var(--dim); letter-spacing:0.05em; margin:12px 0 0; }
   .logout { position:absolute; top:24px; right:20px; }
 
-  .card { position:relative; background:var(--card); border:1px solid var(--card-border); border-radius:14px; padding:26px; margin:0 auto 20px; max-width:680px; }
-  .card.accent { border-top:0; }
+  .card { position:relative; background:var(--card); border:1px solid var(--card-border); border-radius:14px; padding:26px; margin:0 auto 20px; max-width:760px; }
   .card.accent::before { content:""; position:absolute; top:0; left:0; right:0; height:2px; border-radius:14px 14px 0 0; background:linear-gradient(135deg,var(--amber),var(--teal)); }
   #loginCard { max-width:420px; }
 
@@ -56,12 +55,22 @@ const PAGE = `<!doctype html>
   input, select { background:var(--field); border:1px solid var(--card-border); color:var(--white); border-radius:8px; padding:10px 11px; font-size:14px; font-family:'DM Sans',sans-serif; }
   input:focus, select:focus { outline:none; border-color:var(--teal); }
   .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px 18px; }
-  .grid button { grid-column:1 / -1; }
+  .grid .full, .grid button[type=submit] { grid-column:1 / -1; }
 
   button { background:var(--amber); color:#1a1205; border:none; border-radius:8px; padding:11px 18px; font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; }
   button:hover { filter:brightness(1.08); }
   button.ghost { background:none; color:var(--dim); border:1px solid var(--card-border); font-size:10px; padding:6px 12px; letter-spacing:0.12em; }
   button.ghost:hover { color:var(--white); border-color:var(--teal-border); }
+  button.ghost.danger:hover { color:var(--amber); border-color:var(--amber); }
+
+  /* endpoint pack editor */
+  .packs-head { display:flex; align-items:center; justify-content:space-between; }
+  .packs-label { font-size:10px; font-weight:500; letter-spacing:0.14em; text-transform:uppercase; color:var(--dim); }
+  .pack-row { display:flex; align-items:center; gap:8px; margin-top:8px; }
+  .pack-row select { padding:7px 9px; }
+  .pack-qty { width:62px; padding:7px 9px; }
+  .pack-unit, .pack-x { color:var(--dim); font-size:12px; }
+  #packHint { margin:8px 0 0; }
 
   .err { color:var(--amber); font-size:12px; margin-top:10px; min-height:1em; letter-spacing:0.02em; }
   #loginForm { display:flex; gap:10px; }
@@ -71,9 +80,10 @@ const PAGE = `<!doctype html>
   #keyValue { font-family:'Courier New',monospace; font-size:18px; letter-spacing:0.06em; color:var(--teal); }
 
   table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--card-border); }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--card-border); vertical-align:middle; }
   th { font-family:'Cinzel',serif; font-weight:400; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--teal); }
   td code { font-family:'Courier New',monospace; color:var(--amber); }
+  td button.ghost { font-size:9px; padding:4px 9px; margin-right:6px; }
   tr.revoked td { opacity:0.55; }
   .pill { font-size:9px; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; padding:3px 9px; border-radius:999px; white-space:nowrap; }
   .pill.active { color:var(--teal); background:var(--teal-dim); border:1px solid var(--teal-border); }
@@ -106,14 +116,9 @@ const PAGE = `<!doctype html>
     <form id="issueForm" class="grid">
       <label>Tier
         <select id="tier">
-          <option value="business">Business</option>
-          <option value="professional" selected>Professional</option>
+          <option value="professional">Professional</option>
+          <option value="business" selected>Business</option>
           <option value="enterprise">Enterprise</option>
-        </select>
-      </label>
-      <label id="packWrap">Pack size
-        <select id="packSize">
-          <option>10</option><option>20</option><option>50</option><option>100</option>
         </select>
       </label>
       <label>Organization
@@ -125,9 +130,17 @@ const PAGE = `<!doctype html>
       <label>Expires (optional)
         <input id="expires" type="date">
       </label>
-      <label>Notes (optional)
-        <input id="notes" placeholder="sales ref, partner, etc.">
+      <label class="full">Notes (optional)
+        <input id="notes" placeholder="sales ref, partner, subscription id, etc.">
       </label>
+      <div id="packWrap" class="full">
+        <div class="packs-head">
+          <span class="packs-label">Endpoint packs</span>
+          <button id="addPackBtn" type="button" class="ghost">+ Add pack</button>
+        </div>
+        <div id="packRows"></div>
+        <p class="muted" id="packHint">Each pack adds its size in managed endpoints and 5x that in device inventory. Add as many as the order includes.</p>
+      </div>
       <button type="submit">Generate key</button>
     </form>
     <div id="issueErr" class="err"></div>
@@ -140,7 +153,7 @@ const PAGE = `<!doctype html>
   <section id="listCard" class="card" hidden>
     <h2>Issued licenses <button id="refreshBtn" type="button" class="ghost">Refresh</button></h2>
     <table>
-      <thead><tr><th>Key</th><th>Tier</th><th>Organization</th><th>Active</th><th>Issued</th><th>Expires</th><th>Status</th></tr></thead>
+      <thead><tr><th>Key</th><th>Tier</th><th>Organization</th><th>Active</th><th>Packs</th><th>Issued</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody id="licenseBody"></tbody>
     </table>
   </section>
@@ -193,7 +206,58 @@ const PAGE = `<!doctype html>
     api('/admin/logout', { method: 'POST' }).then(refreshAuth);
   });
 
-  function syncPack() { show($('packWrap'), $('tier').value === 'professional'); }
+  // ---- endpoint pack editor ----
+  function makeSizeSelect() {
+    var s = document.createElement('select');
+    [10, 20, 50, 100].forEach(function (n) {
+      var o = document.createElement('option');
+      o.value = String(n);
+      o.textContent = String(n);
+      s.appendChild(o);
+    });
+    return s;
+  }
+  function addPackRow(size, qty) {
+    var row = document.createElement('div');
+    row.className = 'pack-row';
+    var sel = makeSizeSelect();
+    if (size) sel.value = String(size);
+    var unit = document.createElement('span');
+    unit.className = 'pack-unit';
+    unit.textContent = '-endpoint pack';
+    var x = document.createElement('span');
+    x.className = 'pack-x';
+    x.textContent = 'x';
+    var q = document.createElement('input');
+    q.type = 'number';
+    q.min = '1';
+    q.value = String(qty || 1);
+    q.className = 'pack-qty';
+    var rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'ghost';
+    rm.textContent = 'Remove';
+    rm.addEventListener('click', function () { row.remove(); });
+    row.appendChild(sel);
+    row.appendChild(unit);
+    row.appendChild(x);
+    row.appendChild(q);
+    row.appendChild(rm);
+    $('packRows').appendChild(row);
+  }
+  function gatherPacks() {
+    var out = [];
+    var rows = $('packRows').querySelectorAll('.pack-row');
+    for (var i = 0; i < rows.length; i++) {
+      var size = parseInt(rows[i].querySelector('select').value, 10);
+      var qty = parseInt(rows[i].querySelector('input').value, 10);
+      if (size > 0 && qty > 0) out.push({ size: size, qty: qty });
+    }
+    return out;
+  }
+  $('addPackBtn').addEventListener('click', function () { addPackRow(); });
+
+  function syncPack() { show($('packWrap'), $('tier').value !== 'enterprise'); }
   $('tier').addEventListener('change', syncPack);
 
   $('issueForm').addEventListener('submit', function (e) {
@@ -205,7 +269,10 @@ const PAGE = `<!doctype html>
       issued_to_org: $('org').value.trim(),
       contact_email: $('email').value.trim()
     };
-    if (payload.tier === 'professional') payload.pack_size = parseInt($('packSize').value, 10);
+    if (payload.tier !== 'enterprise') {
+      var packs = gatherPacks();
+      if (packs.length > 0) payload.packs = packs;
+    }
     var exp = $('expires').value;
     if (exp) payload.expires_at = exp + 'T00:00:00Z';
     var notes = $('notes').value.trim();
@@ -230,10 +297,37 @@ const PAGE = `<!doctype html>
 
   $('refreshBtn').addEventListener('click', loadList);
 
+  // ---- license actions ----
+  function onRevoke(key) {
+    var reason = prompt('Revocation reason for ' + key + '?', 'subscription cancelled');
+    if (reason === null) return;
+    api('/admin/license/revoke', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ license_key: key, reason: reason })
+    }).then(loadList).catch(function (err) { alert(err.message); });
+  }
+  function onRemove(key) {
+    if (!confirm('Permanently remove ' + key + '? This deletes the license and its activation history.')) return;
+    api('/admin/license/remove', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ license_key: key })
+    }).then(loadList).catch(function (err) { alert(err.message); });
+  }
+
   function cell(text) {
     var td = document.createElement('td');
     td.textContent = (text === null || text === undefined) ? '' : String(text);
     return td;
+  }
+  function formatPacks(raw) {
+    if (!raw) return 'none';
+    try {
+      var arr = JSON.parse(raw);
+      if (!Array.isArray(arr) || arr.length === 0) return 'none';
+      return arr.map(function (p) { return p.qty + 'x' + p.size; }).join(', ');
+    } catch (e) { return 'none'; }
   }
 
   function loadList() {
@@ -251,6 +345,7 @@ const PAGE = `<!doctype html>
         tr.appendChild(cell(l.tier));
         tr.appendChild(cell(l.issued_to_org));
         tr.appendChild(cell(l.active_instances));
+        tr.appendChild(cell(formatPacks(l.packs)));
         tr.appendChild(cell((l.issued_at || '').slice(0, 10)));
         tr.appendChild(cell(l.expires_at ? l.expires_at.slice(0, 10) : 'perpetual'));
         var statusTd = document.createElement('td');
@@ -259,6 +354,22 @@ const PAGE = `<!doctype html>
         pill.textContent = l.revoked_at ? 'revoked' : 'active';
         statusTd.appendChild(pill);
         tr.appendChild(statusTd);
+        var actTd = document.createElement('td');
+        if (!l.revoked_at) {
+          var rev = document.createElement('button');
+          rev.type = 'button';
+          rev.className = 'ghost';
+          rev.textContent = 'Revoke';
+          rev.addEventListener('click', function () { onRevoke(l.license_key); });
+          actTd.appendChild(rev);
+        }
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'ghost danger';
+        del.textContent = 'Remove';
+        del.addEventListener('click', function () { onRemove(l.license_key); });
+        actTd.appendChild(del);
+        tr.appendChild(actTd);
         body.appendChild(tr);
       });
     }).catch(function () { /* list errors are non-fatal */ });

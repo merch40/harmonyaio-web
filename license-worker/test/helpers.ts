@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS licenses (
   license_key    TEXT PRIMARY KEY,
   tier           TEXT NOT NULL,
   pack_size      INTEGER NOT NULL DEFAULT 1,
+  packs          TEXT,
   issued_to_org  TEXT NOT NULL,
   contact_email  TEXT NOT NULL,
   issued_at      TEXT NOT NULL,

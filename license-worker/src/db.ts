@@ -202,3 +202,29 @@ export async function listActiveInstancesForEmail(
     .all<InstanceRow>();
   return res.results ?? [];
 }
+
+// revokeLicense marks a license revoked (kept for audit + reactivation history).
+// Idempotent: an already revoked license keeps its original timestamp and reason.
+export async function revokeLicense(
+  db: D1Database,
+  licenseKey: string,
+  reason: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE licenses
+         SET revoked_at = COALESCE(revoked_at, ?2),
+             revoked_reason = COALESCE(revoked_reason, ?3)
+       WHERE license_key = ?1`,
+    )
+    .bind(licenseKey, nowISO(), reason)
+    .run();
+}
+
+// deleteLicense hard-removes a license and every row that references it.
+export async function deleteLicense(db: D1Database, licenseKey: string): Promise<void> {
+  for (const table of ["instances", "activations", "telemetry", "release_cooldowns"]) {
+    await db.prepare(`DELETE FROM ${table} WHERE license_key = ?1`).bind(licenseKey).run();
+  }
+  await db.prepare("DELETE FROM licenses WHERE license_key = ?1").bind(licenseKey).run();
+}

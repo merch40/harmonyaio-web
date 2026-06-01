@@ -71,15 +71,13 @@ describe("admin console", () => {
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
         tier: "professional",
-        pack_size: 50,
         issued_to_org: "Cookie Co",
         contact_email: "ops@cookie.example",
       }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { license_key: string; pack_size: number };
+    const body = (await res.json()) as { license_key: string };
     expect(body.license_key).toMatch(/^HRM-PRO-/);
-    expect(body.pack_size).toBe(50);
   });
 
   it("issues an enterprise license", async () => {

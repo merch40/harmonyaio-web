@@ -1,13 +1,13 @@
 import { WorkerError, badRequest, unauthorized } from "./errors";
 import { jsonResponse, safeJSON } from "./activate";
-import { nowISO } from "./db";
+import { nowISO, getLicense, revokeLicense, deleteLicense } from "./db";
 import { getSession, issueSessionCookie, clearSessionCookie } from "./magic_link";
 import { checkRateLimit, clientIP } from "./rate_limit";
-import type { Env, Tier } from "./types";
+import type { Env, Pack, Tier } from "./types";
 
 interface AdminIssueRequest {
   tier?: Tier;
-  pack_size?: number;
+  packs?: Pack[];
   issued_to_org?: string;
   contact_email?: string;
   expires_at?: string | null;
@@ -15,12 +15,36 @@ interface AdminIssueRequest {
   notes?: string;
 }
 
+interface KeyRequest {
+  license_key?: string;
+  reason?: string;
+}
+
 // Tiers that can be issued as a key. "home" is synthetic (no key needed).
 const ISSUABLE_TIERS: Tier[] = ["business", "professional", "enterprise"];
+const VALID_PACK_SIZES = [10, 20, 50, 100];
+
+// normalizePacks validates an incoming pack list and merges duplicate sizes.
+// Throws badRequest on an invalid size or quantity.
+function normalizePacks(packs: Pack[] | undefined): Pack[] {
+  if (!packs || packs.length === 0) return [];
+  const bySize = new Map<number, number>();
+  for (const p of packs) {
+    const size = Number(p?.size);
+    const qty = Number(p?.qty);
+    if (!VALID_PACK_SIZES.includes(size)) {
+      throw badRequest("pack size must be one of 10, 20, 50, 100");
+    }
+    if (!Number.isInteger(qty) || qty < 1) {
+      throw badRequest("pack qty must be a positive integer");
+    }
+    bySize.set(size, (bySize.get(size) ?? 0) + qty);
+  }
+  return [...bySize.entries()].sort((a, b) => a[0] - b[0]).map(([size, qty]) => ({ size, qty }));
+}
 
 // requireAdminAuth accepts EITHER the X-Admin-Secret header (server-to-server /
-// CI / scripts) OR an admin session cookie (the /admin web UI). Throws 401
-// otherwise. Keeping the header path means existing automation is unaffected.
+// CI / billing automation) OR an admin session cookie (the /admin web UI).
 export async function requireAdminAuth(req: Request, env: Env): Promise<void> {
   const provided = req.headers.get("x-admin-secret");
   if (provided && env.ADMIN_SECRET && secureEq(provided, env.ADMIN_SECRET)) return;
@@ -41,27 +65,25 @@ export async function handleAdminIssue(req: Request, env: Env): Promise<Response
     throw badRequest("issued_to_org and contact_email are required");
   }
 
-  let packSize = 1;
-  if (body.tier === "professional") {
-    packSize = body.pack_size ?? 10;
-    if (![10, 20, 50, 100].includes(packSize)) {
-      throw badRequest("pack_size must be one of 10, 20, 50, 100 for professional");
-    }
-  } else if (body.tier === "enterprise") {
-    packSize = 0; // unlimited; pack_size is not meaningful for enterprise
+  const packs = normalizePacks(body.packs);
+  if (packs.length > 0 && body.tier === "enterprise") {
+    throw badRequest("enterprise is unlimited; packs do not apply");
   }
+  const packEndpointTotal = packs.reduce((sum, p) => sum + p.size * p.qty, 0);
+  const packsJSON = packs.length > 0 ? JSON.stringify(packs) : null;
 
   const key = body.license_key ?? generateLicenseKey(body.tier);
 
   try {
     await env.DB.prepare(
-      `INSERT INTO licenses (license_key, tier, pack_size, issued_to_org, contact_email, issued_at, expires_at, notes)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+      `INSERT INTO licenses (license_key, tier, pack_size, packs, issued_to_org, contact_email, issued_at, expires_at, notes)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
     )
       .bind(
         key,
         body.tier,
-        packSize,
+        packEndpointTotal, // legacy pack_size column now holds total pack endpoints
+        packsJSON,
         body.issued_to_org,
         body.contact_email,
         nowISO(),
@@ -73,13 +95,19 @@ export async function handleAdminIssue(req: Request, env: Env): Promise<Response
     throw new WorkerError(409, "bad_request", `failed to insert license: ${(err as Error).message}`);
   }
 
-  return jsonResponse(200, { license_key: key, tier: body.tier, pack_size: packSize });
+  return jsonResponse(200, {
+    license_key: key,
+    tier: body.tier,
+    packs,
+    pack_endpoints: packEndpointTotal,
+  });
 }
 
 interface LicenseListRow {
   license_key: string;
   tier: string;
   pack_size: number;
+  packs: string | null;
   issued_to_org: string;
   contact_email: string;
   issued_at: string;
@@ -88,12 +116,12 @@ interface LicenseListRow {
   active_instances: number;
 }
 
-// handleAdminLicensesList returns the most recent licenses plus a live count of
-// active (un-released) instances per key, for the admin console table.
+// handleAdminLicensesList returns recent licenses plus a live count of active
+// (un-released) instances per key, for the admin console table.
 export async function handleAdminLicensesList(req: Request, env: Env): Promise<Response> {
   await requireAdminAuth(req, env);
   const { results } = await env.DB.prepare(
-    `SELECT l.license_key, l.tier, l.pack_size, l.issued_to_org, l.contact_email,
+    `SELECT l.license_key, l.tier, l.pack_size, l.packs, l.issued_to_org, l.contact_email,
             l.issued_at, l.expires_at, l.revoked_at,
             (SELECT COUNT(*) FROM instances i
               WHERE i.license_key = l.license_key AND i.released_at IS NULL) AS active_instances
@@ -102,6 +130,30 @@ export async function handleAdminLicensesList(req: Request, env: Env): Promise<R
       LIMIT 200`,
   ).all<LicenseListRow>();
   return jsonResponse(200, { licenses: results ?? [] });
+}
+
+// revoke + remove. Admin-gated, and the X-Admin-Secret header path makes them
+// safe to call from a billing system (e.g. on subscription cancellation).
+export async function handleAdminRevoke(req: Request, env: Env): Promise<Response> {
+  await requireAdminAuth(req, env);
+  const body = (await safeJSON(req)) as KeyRequest | null;
+  const key = body?.license_key?.trim();
+  if (!key) throw badRequest("license_key required");
+  const existing = await getLicense(env.DB, key);
+  if (!existing) throw new WorkerError(404, "not_found", "license not found");
+  await revokeLicense(env.DB, key, body?.reason?.trim() || "revoked");
+  return jsonResponse(200, { ok: true, license_key: key, revoked: true });
+}
+
+export async function handleAdminRemove(req: Request, env: Env): Promise<Response> {
+  await requireAdminAuth(req, env);
+  const body = (await safeJSON(req)) as KeyRequest | null;
+  const key = body?.license_key?.trim();
+  if (!key) throw badRequest("license_key required");
+  const existing = await getLicense(env.DB, key);
+  if (!existing) throw new WorkerError(404, "not_found", "license not found");
+  await deleteLicense(env.DB, key);
+  return jsonResponse(200, { ok: true, license_key: key, removed: true });
 }
 
 // ---------------- admin session (password login) ----------------

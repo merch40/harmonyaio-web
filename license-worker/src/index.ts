@@ -6,6 +6,8 @@ import { handleAuthRequest, handleAuthVerify } from "./magic_link";
 import {
   handleAdminIssue,
   handleAdminLicensesList,
+  handleAdminRevoke,
+  handleAdminRemove,
   handleAdminAuth,
   handleAdminSession,
   handleAdminLogout,
@@ -41,6 +43,8 @@ export default {
       if (method === "GET" && path === "/admin/session") return await handleAdminSession(req, env);
       if (method === "GET" && path === "/admin/licenses") return await handleAdminLicensesList(req, env);
       if (method === "POST" && path === "/admin/license") return await handleAdminIssue(req, env);
+      if (method === "POST" && path === "/admin/license/revoke") return await handleAdminRevoke(req, env);
+      if (method === "POST" && path === "/admin/license/remove") return await handleAdminRemove(req, env);
 
       throw notFound(`no route for ${method} ${path}`);
     } catch (err) {

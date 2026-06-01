@@ -18,9 +18,17 @@ if (existsSync(SECRETS_PATH)) {
 
 export default defineWorkersConfig({
   test: {
+    // The workers pool signs ed25519 blobs in-runtime, which is CPU-heavy and
+    // slow under load; give activate/validate-driven tests room beyond the 5s default.
+    testTimeout: 30000,
+    hookTimeout: 30000,
     poolOptions: {
       workers: {
         singleWorker: true,
+        // Every test resets state via resetDB() in beforeEach, so per-test
+        // isolated storage is redundant and its stacked-storage machinery is the
+        // source of flaky "Network connection lost" errors under load. Disable it.
+        isolatedStorage: false,
         miniflare: {
           compatibilityDate: "2024-12-30",
           compatibilityFlags: ["nodejs_compat"],
