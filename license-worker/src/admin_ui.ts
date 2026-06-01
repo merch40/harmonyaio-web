@@ -101,6 +101,8 @@ const PAGE = `<!doctype html>
   .modal-row .v { text-align:right; word-break:break-all; }
   .modal-row .v code { font-family:'Courier New',monospace; color:var(--teal); }
   .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
+  .modal-actions .crm { background:rgba(224,80,64,0.14); color:#e05040; border:1px solid rgba(224,80,64,0.45); }
+  .modal-actions .crm:hover { background:rgba(224,80,64,0.22); border-color:#e05040; color:#e05040; cursor:help; }
 </style>
 </head>
 <body>
@@ -184,7 +186,11 @@ const PAGE = `<!doctype html>
   <div class="modal">
     <h3>License detail</h3>
     <div id="detailBody"></div>
+    <!-- TODO: wire "Connect to CRM" to Dynamics 365 (D365) CRM. Sync this
+         license (key, tier, org, contact, packs, expiry, status) to a CRM
+         record and link back. Currently a Coming Soon placeholder. -->
     <div class="modal-actions">
+      <button id="crmBtn" type="button" class="crm" title="Coming Soon" aria-disabled="true">Connect to CRM</button>
       <button id="detailCopyBtn" type="button" class="ghost">Copy key</button>
       <button id="detailCloseBtn" type="button" class="ghost">Close</button>
     </div>
