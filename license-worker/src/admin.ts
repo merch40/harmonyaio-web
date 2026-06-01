@@ -22,6 +22,14 @@ interface KeyRequest {
   reason?: string;
 }
 
+interface AdminUpdateRequest {
+  license_key?: string;
+  issued_to_org?: string;
+  contact_email?: string;
+  company_id?: string;
+  notes?: string;
+}
+
 // Tiers that can be issued as a key. "home" is synthetic (no key needed).
 const ISSUABLE_TIERS: Tier[] = ["business", "professional", "enterprise"];
 const VALID_PACK_SIZES = [10, 20, 50, 100];
@@ -127,6 +135,7 @@ interface LicenseListRow {
   issued_to_org: string;
   contact_email: string;
   company_id: string | null;
+  notes: string | null;
   issued_at: string;
   expires_at: string | null;
   revoked_at: string | null;
@@ -138,7 +147,7 @@ interface LicenseListRow {
 export async function handleAdminLicensesList(req: Request, env: Env): Promise<Response> {
   await requireAdminAuth(req, env);
   const { results } = await env.DB.prepare(
-    `SELECT l.license_key, l.tier, l.pack_size, l.packs, l.issued_to_org, l.contact_email, l.company_id,
+    `SELECT l.license_key, l.tier, l.pack_size, l.packs, l.issued_to_org, l.contact_email, l.company_id, l.notes,
             l.issued_at, l.expires_at, l.revoked_at,
             (SELECT COUNT(*) FROM instances i
               WHERE i.license_key = l.license_key AND i.released_at IS NULL) AS active_instances
@@ -184,6 +193,31 @@ export async function handleAdminForceRelease(req: Request, env: Env): Promise<R
   if (!existing) throw new WorkerError(404, "not_found", "license not found");
   const released = await forceReleaseLicense(env.DB, key);
   return jsonResponse(200, { ok: true, license_key: key, released });
+}
+
+// handleAdminUpdate edits a license's metadata (org, contact, company id, notes).
+// PATCH semantics: only fields present in the body are changed. Does not touch
+// tier / packs / expiry (those are entitlement changes, handled by re-issue).
+export async function handleAdminUpdate(req: Request, env: Env): Promise<Response> {
+  await requireAdminAuth(req, env);
+  const body = (await safeJSON(req)) as AdminUpdateRequest | null;
+  const key = body?.license_key?.trim();
+  if (!key) throw badRequest("license_key required");
+  const existing = await getLicense(env.DB, key);
+  if (!existing) throw new WorkerError(404, "not_found", "license not found");
+
+  const org = body?.issued_to_org !== undefined ? body.issued_to_org.trim() : existing.issued_to_org;
+  const email = body?.contact_email !== undefined ? body.contact_email.trim() : existing.contact_email;
+  if (!org || !email) throw badRequest("organization and contact email are required");
+  const companyId = body?.company_id !== undefined ? body.company_id.trim() || null : existing.company_id;
+  const notes = body?.notes !== undefined ? body.notes.trim() || null : existing.notes;
+
+  await env.DB.prepare(
+    `UPDATE licenses SET issued_to_org = ?2, contact_email = ?3, company_id = ?4, notes = ?5 WHERE license_key = ?1`,
+  )
+    .bind(key, org, email, companyId, notes)
+    .run();
+  return jsonResponse(200, { ok: true, license_key: key });
 }
 
 // ---------------- admin session (password login) ----------------

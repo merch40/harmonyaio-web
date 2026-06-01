@@ -282,3 +282,41 @@ describe("company id", () => {
     expect(row?.company_id).toBe("DEBTOR-12345");
   });
 });
+
+describe("edit metadata", () => {
+  it("updates org, contact email, and company id", async () => {
+    const issued = (await (
+      await issue(cookie, { tier: "business", issued_to_org: "Old Name", contact_email: "old@x.example", company_id: "OLD-1" })
+    ).json()) as { license_key: string };
+
+    const upd = await SELF.fetch("https://license.test/admin/license/update", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        license_key: issued.license_key,
+        issued_to_org: "New Name",
+        contact_email: "new@x.example",
+        company_id: "NEW-9",
+      }),
+    });
+    expect(upd.status).toBe(200);
+
+    const list = await SELF.fetch("https://license.test/admin/licenses", { headers: { cookie } });
+    const body = (await list.json()) as {
+      licenses: Array<{ license_key: string; issued_to_org: string; contact_email: string; company_id: string | null }>;
+    };
+    const row = body.licenses.find((l) => l.license_key === issued.license_key);
+    expect(row?.issued_to_org).toBe("New Name");
+    expect(row?.contact_email).toBe("new@x.example");
+    expect(row?.company_id).toBe("NEW-9");
+  });
+
+  it("update requires admin auth", async () => {
+    const r = await SELF.fetch("https://license.test/admin/license/update", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ license_key: "HRM-BUS-XXXX-YYYY-ZZZZ", issued_to_org: "x" }),
+    });
+    expect(r.status).toBe(401);
+  });
+});

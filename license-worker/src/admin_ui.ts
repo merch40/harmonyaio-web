@@ -104,6 +104,9 @@ const PAGE = `<!doctype html>
   .modal-row .k { color:var(--dim); text-transform:uppercase; letter-spacing:0.08em; font-size:10px; align-self:center; white-space:nowrap; }
   .modal-row .v { text-align:right; word-break:break-all; }
   .modal-row .v code { font-family:'Courier New',monospace; color:var(--teal); }
+  .modal-edit { display:flex; flex-direction:column; gap:6px; padding:9px 0; border-bottom:1px solid var(--card-border); }
+  .modal-edit .k { color:var(--dim); text-transform:uppercase; letter-spacing:0.08em; font-size:10px; }
+  .modal-edit input { width:100%; }
   .modal-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:18px; }
   button.crm { background:rgba(224,80,64,0.14); color:#e05040; border:1px solid rgba(224,80,64,0.45); }
   button.crm:hover { background:rgba(224,80,64,0.22); border-color:#e05040; color:#e05040; cursor:help; }
@@ -222,10 +225,13 @@ const PAGE = `<!doctype html>
     <h3>License detail</h3>
     <div id="detailBody"></div>
     <div class="modal-actions">
+      <button id="detailEditBtn" type="button" class="ghost">Edit</button>
       <button id="forceReleaseBtn" type="button" class="ghost">Release</button>
       <button id="detailRevokeBtn" type="button" class="ghost">Revoke</button>
       <button id="detailRemoveBtn" type="button" class="ghost danger">Remove</button>
       <button id="detailCopyBtn" type="button" class="ghost">Copy key</button>
+      <button id="detailSaveBtn" type="button" hidden>Save</button>
+      <button id="detailCancelBtn" type="button" class="ghost" hidden>Cancel</button>
       <button id="detailCloseBtn" type="button" class="ghost">Close</button>
     </div>
   </div>
@@ -402,6 +408,8 @@ const PAGE = `<!doctype html>
 
   // ---- detail modal ----
   var detailKey = '';
+  var currentLicense = null;
+  function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
   function modalRow(k, v, isCode) {
     var row = document.createElement('div');
     row.className = 'modal-row';
@@ -421,24 +429,57 @@ const PAGE = `<!doctype html>
     row.appendChild(vv);
     return row;
   }
-  function showDetail(l) {
-    detailKey = l.license_key;
-    var bound = l.active_instances > 0;
+  function editField(label, id, val) {
+    var wrap = document.createElement('div');
+    wrap.className = 'modal-edit';
+    var k = document.createElement('span');
+    k.className = 'k';
+    k.textContent = label;
+    var inp = document.createElement('input');
+    inp.id = id;
+    inp.value = val || '';
+    wrap.appendChild(k);
+    wrap.appendChild(inp);
+    return wrap;
+  }
+  function renderView(l) {
     var b = $('detailBody');
     b.innerHTML = '';
     b.appendChild(modalRow('License key', l.license_key, true));
-    b.appendChild(modalRow('Tier', l.tier));
+    b.appendChild(modalRow('Tier', cap(l.tier)));
     b.appendChild(modalRow('Organization', l.issued_to_org));
     b.appendChild(modalRow('Company ID', l.company_id || 'not set'));
     b.appendChild(modalRow('Contact email', l.contact_email || ''));
+    b.appendChild(modalRow('Notes', l.notes || 'none'));
     b.appendChild(modalRow('Endpoint packs', formatPacks(l.packs)));
     b.appendChild(modalRow('Issued', (l.issued_at || '').slice(0, 10)));
-    b.appendChild(modalRow('Expires', l.expires_at ? l.expires_at.slice(0, 10) : 'perpetual'));
-    b.appendChild(modalRow('Binding', bound ? 'Bound' : 'Unbound'));
-    b.appendChild(modalRow('Status', l.revoked_at ? 'revoked' : 'active'));
-    // Release only matters when bound; can't revoke an already-revoked license.
-    show($('forceReleaseBtn'), bound);
-    show($('detailRevokeBtn'), !l.revoked_at);
+    b.appendChild(modalRow('Expires', l.expires_at ? l.expires_at.slice(0, 10) : 'Perpetual'));
+    b.appendChild(modalRow('Binding', l.active_instances > 0 ? 'Bound' : 'Unbound'));
+    b.appendChild(modalRow('Status', l.revoked_at ? 'Revoked' : 'Active'));
+  }
+  function renderEdit(l) {
+    var b = $('detailBody');
+    b.innerHTML = '';
+    b.appendChild(editField('Organization', 'edOrg', l.issued_to_org));
+    b.appendChild(editField('Contact email', 'edEmail', l.contact_email));
+    b.appendChild(editField('Company ID', 'edCompany', l.company_id));
+    b.appendChild(editField('Notes', 'edNotes', l.notes));
+  }
+  function setEditMode(on) {
+    var l = currentLicense;
+    if (on) renderEdit(l); else renderView(l);
+    show($('detailEditBtn'), !on);
+    show($('forceReleaseBtn'), !on && l.active_instances > 0);
+    show($('detailRevokeBtn'), !on && !l.revoked_at);
+    show($('detailRemoveBtn'), !on);
+    show($('detailCopyBtn'), !on);
+    show($('detailSaveBtn'), on);
+    show($('detailCancelBtn'), on);
+  }
+  function showDetail(l) {
+    currentLicense = l;
+    detailKey = l.license_key;
+    setEditMode(false);
     show($('detailOverlay'), true);
   }
   $('detailCloseBtn').addEventListener('click', function () { show($('detailOverlay'), false); });
@@ -466,6 +507,30 @@ const PAGE = `<!doctype html>
   });
   $('detailRevokeBtn').addEventListener('click', function () { if (detailKey) onRevoke(detailKey); });
   $('detailRemoveBtn').addEventListener('click', function () { if (detailKey) onRemove(detailKey); });
+  $('detailEditBtn').addEventListener('click', function () { if (currentLicense) setEditMode(true); });
+  $('detailCancelBtn').addEventListener('click', function () { setEditMode(false); });
+  $('detailSaveBtn').addEventListener('click', function () {
+    if (!currentLicense) return;
+    var payload = {
+      license_key: currentLicense.license_key,
+      issued_to_org: $('edOrg').value.trim(),
+      contact_email: $('edEmail').value.trim(),
+      company_id: $('edCompany').value.trim(),
+      notes: $('edNotes').value.trim()
+    };
+    api('/admin/license/update', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function () {
+      currentLicense.issued_to_org = payload.issued_to_org;
+      currentLicense.contact_email = payload.contact_email;
+      currentLicense.company_id = payload.company_id || null;
+      currentLicense.notes = payload.notes || null;
+      setEditMode(false);
+      loadList();
+    }).catch(function (err) { alert(err.message); });
+  });
 
   function cell(text) {
     var td = document.createElement('td');
