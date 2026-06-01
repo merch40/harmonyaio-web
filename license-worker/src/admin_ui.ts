@@ -88,6 +88,8 @@ const PAGE = `<!doctype html>
   .pill { font-size:9px; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; padding:3px 9px; border-radius:999px; white-space:nowrap; }
   .pill.active { color:var(--teal); background:var(--teal-dim); border:1px solid var(--teal-border); }
   .pill.revoked { color:var(--dim); background:rgba(240,237,232,0.04); border:1px solid rgba(240,237,232,0.18); }
+  .pill.bound { color:var(--teal); background:var(--teal-dim); border:1px solid var(--teal-border); }
+  .pill.unbound { color:var(--dim); background:rgba(240,237,232,0.04); border:1px solid rgba(240,237,232,0.18); }
 
   /* detail modal */
   .modal-overlay { position:fixed; inset:0; z-index:5000; background:rgba(0,0,0,0.66); display:flex; align-items:center; justify-content:center; padding:20px; }
@@ -99,7 +101,7 @@ const PAGE = `<!doctype html>
   .modal-row .k { color:var(--dim); text-transform:uppercase; letter-spacing:0.08em; font-size:10px; align-self:center; white-space:nowrap; }
   .modal-row .v { text-align:right; word-break:break-all; }
   .modal-row .v code { font-family:'Courier New',monospace; color:var(--teal); }
-  .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
+  .modal-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:18px; }
   .modal-actions .crm { background:rgba(224,80,64,0.14); color:#e05040; border:1px solid rgba(224,80,64,0.45); }
   .modal-actions .crm:hover { background:rgba(224,80,64,0.22); border-color:#e05040; color:#e05040; cursor:help; }
 </style>
@@ -175,7 +177,7 @@ const PAGE = `<!doctype html>
   <section id="listCard" class="card" hidden>
     <h2>Issued licenses <button id="refreshBtn" type="button" class="ghost">Refresh</button></h2>
     <table>
-      <thead><tr><th>Organization</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Organization</th><th>Status</th><th>Bound</th><th>Actions</th></tr></thead>
       <tbody id="licenseBody"></tbody>
     </table>
   </section>
@@ -189,6 +191,9 @@ const PAGE = `<!doctype html>
          license (key, tier, org, contact, packs, expiry, status) to a CRM
          record and link back. Currently a Coming Soon placeholder. -->
     <div class="modal-actions">
+      <button id="forceReleaseBtn" type="button" class="ghost">Release</button>
+      <button id="detailRevokeBtn" type="button" class="ghost">Revoke</button>
+      <button id="detailRemoveBtn" type="button" class="ghost danger">Remove</button>
       <button id="crmBtn" type="button" class="crm" title="Coming Soon" aria-disabled="true">Connect to CRM</button>
       <button id="detailCopyBtn" type="button" class="ghost">Copy key</button>
       <button id="detailCloseBtn" type="button" class="ghost">Close</button>
@@ -343,6 +348,7 @@ const PAGE = `<!doctype html>
   $('refreshBtn').addEventListener('click', loadList);
 
   // ---- license actions ----
+  function afterAction() { show($('detailOverlay'), false); loadList(); }
   function onRevoke(key) {
     var reason = prompt('Revocation reason for ' + key + '?', 'subscription cancelled');
     if (reason === null) return;
@@ -350,7 +356,7 @@ const PAGE = `<!doctype html>
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ license_key: key, reason: reason })
-    }).then(loadList).catch(function (err) { alert(err.message); });
+    }).then(afterAction).catch(function (err) { alert(err.message); });
   }
   function onRemove(key) {
     if (!confirm('Permanently remove ' + key + '? This deletes the license and its activation history.')) return;
@@ -358,7 +364,7 @@ const PAGE = `<!doctype html>
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ license_key: key })
-    }).then(loadList).catch(function (err) { alert(err.message); });
+    }).then(afterAction).catch(function (err) { alert(err.message); });
   }
 
   // ---- detail modal ----
@@ -384,6 +390,7 @@ const PAGE = `<!doctype html>
   }
   function showDetail(l) {
     detailKey = l.license_key;
+    var bound = l.active_instances > 0;
     var b = $('detailBody');
     b.innerHTML = '';
     b.appendChild(modalRow('License key', l.license_key, true));
@@ -393,8 +400,11 @@ const PAGE = `<!doctype html>
     b.appendChild(modalRow('Endpoint packs', formatPacks(l.packs)));
     b.appendChild(modalRow('Issued', (l.issued_at || '').slice(0, 10)));
     b.appendChild(modalRow('Expires', l.expires_at ? l.expires_at.slice(0, 10) : 'perpetual'));
-    b.appendChild(modalRow('Active instances', String(l.active_instances)));
+    b.appendChild(modalRow('Binding', bound ? 'Bound' : 'Unbound'));
     b.appendChild(modalRow('Status', l.revoked_at ? 'revoked' : 'active'));
+    // Release only matters when bound; can't revoke an already-revoked license.
+    show($('forceReleaseBtn'), bound);
+    show($('detailRevokeBtn'), !l.revoked_at);
     show($('detailOverlay'), true);
   }
   $('detailCloseBtn').addEventListener('click', function () { show($('detailOverlay'), false); });
@@ -407,6 +417,21 @@ const PAGE = `<!doctype html>
       setTimeout(function () { $('detailCopyBtn').textContent = 'Copy key'; }, 1500);
     });
   });
+  $('forceReleaseBtn').addEventListener('click', function () {
+    if (!detailKey) return;
+    if (!confirm('Force-release the active binding for ' + detailKey + '?\n\nThe key is unbound from its current server so it can activate on a new one. Use this for migrations or after wiping a server.')) return;
+    api('/admin/license/force-release', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ license_key: detailKey })
+    }).then(function (d) {
+      alert('Released ' + (d.released || 0) + ' binding(s).');
+      show($('detailOverlay'), false);
+      loadList();
+    }).catch(function (err) { alert(err.message); });
+  });
+  $('detailRevokeBtn').addEventListener('click', function () { if (detailKey) onRevoke(detailKey); });
+  $('detailRemoveBtn').addEventListener('click', function () { if (detailKey) onRemove(detailKey); });
 
   function cell(text) {
     var td = document.createElement('td');
@@ -436,6 +461,13 @@ const PAGE = `<!doctype html>
         pill.textContent = l.revoked_at ? 'revoked' : 'active';
         statusTd.appendChild(pill);
         tr.appendChild(statusTd);
+        var boundTd = document.createElement('td');
+        var bpill = document.createElement('span');
+        var isBound = l.active_instances > 0;
+        bpill.className = isBound ? 'pill bound' : 'pill unbound';
+        bpill.textContent = isBound ? 'bound' : 'unbound';
+        boundTd.appendChild(bpill);
+        tr.appendChild(boundTd);
         var actTd = document.createElement('td');
         actTd.className = 'actions';
         var det = document.createElement('button');
@@ -444,20 +476,6 @@ const PAGE = `<!doctype html>
         det.textContent = 'Detail';
         det.addEventListener('click', function () { showDetail(l); });
         actTd.appendChild(det);
-        if (!l.revoked_at) {
-          var rev = document.createElement('button');
-          rev.type = 'button';
-          rev.className = 'ghost';
-          rev.textContent = 'Revoke';
-          rev.addEventListener('click', function () { onRevoke(l.license_key); });
-          actTd.appendChild(rev);
-        }
-        var del = document.createElement('button');
-        del.type = 'button';
-        del.className = 'ghost danger';
-        del.textContent = 'Remove';
-        del.addEventListener('click', function () { onRemove(l.license_key); });
-        actTd.appendChild(del);
         tr.appendChild(actTd);
         body.appendChild(tr);
       });

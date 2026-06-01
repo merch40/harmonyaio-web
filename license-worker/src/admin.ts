@@ -1,6 +1,6 @@
 import { WorkerError, badRequest, unauthorized } from "./errors";
 import { jsonResponse, safeJSON } from "./activate";
-import { nowISO, getLicense, revokeLicense, deleteLicense } from "./db";
+import { nowISO, getLicense, revokeLicense, deleteLicense, forceReleaseLicense } from "./db";
 import { getSession, issueSessionCookie, clearSessionCookie } from "./magic_link";
 import { checkRateLimit, clientIP } from "./rate_limit";
 import type { Env, Pack, Tier } from "./types";
@@ -167,6 +167,19 @@ export async function handleAdminRemove(req: Request, env: Env): Promise<Respons
   if (!existing) throw new WorkerError(404, "not_found", "license not found");
   await deleteLicense(env.DB, key);
   return jsonResponse(200, { ok: true, license_key: key, removed: true });
+}
+
+// handleAdminForceRelease unbinds a license from its current instance with no
+// cooldown, so the key can re-activate on a new server. Admin-only.
+export async function handleAdminForceRelease(req: Request, env: Env): Promise<Response> {
+  await requireAdminAuth(req, env);
+  const body = (await safeJSON(req)) as KeyRequest | null;
+  const key = body?.license_key?.trim();
+  if (!key) throw badRequest("license_key required");
+  const existing = await getLicense(env.DB, key);
+  if (!existing) throw new WorkerError(404, "not_found", "license not found");
+  const released = await forceReleaseLicense(env.DB, key);
+  return jsonResponse(200, { ok: true, license_key: key, released });
 }
 
 // ---------------- admin session (password login) ----------------

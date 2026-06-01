@@ -228,3 +228,14 @@ export async function deleteLicense(db: D1Database, licenseKey: string): Promise
   }
   await db.prepare("DELETE FROM licenses WHERE license_key = ?1").bind(licenseKey).run();
 }
+
+// forceReleaseLicense releases every active (un-released) binding for a license,
+// freeing the key to activate on a new instance (a migration, or a wiped server
+// that regenerated its instance id). Admin-only; no cooldown. Returns the count.
+export async function forceReleaseLicense(db: D1Database, licenseKey: string): Promise<number> {
+  const res = await db
+    .prepare("UPDATE instances SET released_at = ?2 WHERE license_key = ?1 AND released_at IS NULL")
+    .bind(licenseKey, nowISO())
+    .run();
+  return res.meta?.changes ?? 0;
+}

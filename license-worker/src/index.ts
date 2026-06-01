@@ -8,6 +8,7 @@ import {
   handleAdminLicensesList,
   handleAdminRevoke,
   handleAdminRemove,
+  handleAdminForceRelease,
   handleAdminAuth,
   handleAdminSession,
   handleAdminLogout,
@@ -45,6 +46,7 @@ export default {
       if (method === "POST" && path === "/admin/license") return await handleAdminIssue(req, env);
       if (method === "POST" && path === "/admin/license/revoke") return await handleAdminRevoke(req, env);
       if (method === "POST" && path === "/admin/license/remove") return await handleAdminRemove(req, env);
+      if (method === "POST" && path === "/admin/license/force-release") return await handleAdminForceRelease(req, env);
 
       throw notFound(`no route for ${method} ${path}`);
     } catch (err) {

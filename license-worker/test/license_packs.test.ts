@@ -208,6 +208,33 @@ describe("revoke and remove", () => {
     });
     expect(rm.status).toBe(401);
   });
+
+  it("force-release frees a bound key for a new instance", async () => {
+    const { license_key } = (await (
+      await issue(cookie, { tier: "business", issued_to_org: "Mig", contact_email: "m@x.example" })
+    ).json()) as { license_key: string };
+    expect((await activate(license_key, "inst-old")).status).toBe(200);
+    // a different instance cannot bind while inst-old holds it
+    expect((await activate(license_key, "inst-new")).status).toBe(409);
+    const fr = await SELF.fetch("https://license.test/admin/license/force-release", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ license_key }),
+    });
+    expect(fr.status).toBe(200);
+    expect(((await fr.json()) as { released: number }).released).toBe(1);
+    // now the new instance can bind
+    expect((await activate(license_key, "inst-new")).status).toBe(200);
+  });
+
+  it("force-release requires admin auth", async () => {
+    const fr = await SELF.fetch("https://license.test/admin/license/force-release", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ license_key: "HRM-BUS-XXXX-YYYY-ZZZZ" }),
+    });
+    expect(fr.status).toBe(401);
+  });
 });
 
 describe("subscription term", () => {
