@@ -23,7 +23,7 @@ const PAGE = `<!doctype html>
   }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--ink); color:var(--white); font-family:'DM Sans',system-ui,sans-serif; font-weight:400; -webkit-font-smoothing:antialiased; }
-  .wrap { position:relative; max-width:1180px; margin:0 auto; padding:48px 20px 80px; }
+  .wrap { position:relative; max-width:980px; margin:0 auto; padding:48px 20px 80px; }
 
   .brand { text-align:center; margin-bottom:36px; }
   .wordmark-h {
@@ -47,7 +47,6 @@ const PAGE = `<!doctype html>
   .card { position:relative; background:var(--card); border:1px solid var(--card-border); border-radius:14px; padding:26px; margin:0 auto 20px; max-width:760px; }
   .card.accent::before { content:""; position:absolute; top:0; left:0; right:0; height:2px; border-radius:14px 14px 0 0; background:linear-gradient(135deg,var(--amber),var(--teal)); }
   #loginCard { max-width:420px; }
-  #listCard { max-width:100%; }
 
   h2 { font-family:'Cinzel',serif; font-weight:600; font-size:14px; letter-spacing:0.06em; text-transform:uppercase; margin:0 0 16px; display:flex; align-items:center; gap:12px; }
   .muted { color:var(--dim); font-size:13px; margin:0 0 14px; }
@@ -176,7 +175,7 @@ const PAGE = `<!doctype html>
   <section id="listCard" class="card" hidden>
     <h2>Issued licenses <button id="refreshBtn" type="button" class="ghost">Refresh</button></h2>
     <table>
-      <thead><tr><th>Tier</th><th>Organization</th><th>Active</th><th>Packs</th><th>Issued</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Organization</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody id="licenseBody"></tbody>
     </table>
   </section>
@@ -430,12 +429,7 @@ const PAGE = `<!doctype html>
       (d.licenses || []).forEach(function (l) {
         var tr = document.createElement('tr');
         if (l.revoked_at) tr.className = 'revoked';
-        tr.appendChild(cell(l.tier));
         tr.appendChild(cell(l.issued_to_org));
-        tr.appendChild(cell(l.active_instances));
-        tr.appendChild(cell(formatPacks(l.packs)));
-        tr.appendChild(cell((l.issued_at || '').slice(0, 10)));
-        tr.appendChild(cell(l.expires_at ? l.expires_at.slice(0, 10) : 'perpetual'));
         var statusTd = document.createElement('td');
         var pill = document.createElement('span');
         pill.className = l.revoked_at ? 'pill revoked' : 'pill active';
