@@ -107,6 +107,8 @@ const PAGE = `<!doctype html>
   .modal-edit { display:flex; flex-direction:column; gap:6px; padding:9px 0; border-bottom:1px solid var(--card-border); }
   .modal-edit .k { color:var(--dim); text-transform:uppercase; letter-spacing:0.08em; font-size:10px; }
   .modal-edit input { width:100%; }
+  .modal-edit-packs { padding:9px 0; border-bottom:1px solid var(--card-border); }
+  .modal-edit-packs .k { color:var(--dim); text-transform:uppercase; letter-spacing:0.08em; font-size:10px; }
   .modal-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:18px; }
   button.crm { background:rgba(224,80,64,0.14); color:#e05040; border:1px solid rgba(224,80,64,0.45); }
   button.crm:hover { background:rgba(224,80,64,0.22); border-color:#e05040; color:#e05040; cursor:help; }
@@ -296,7 +298,7 @@ const PAGE = `<!doctype html>
     });
     return s;
   }
-  function addPackRow(size, qty) {
+  function addPackRow(container, size, qty) {
     var row = document.createElement('div');
     row.className = 'pack-row';
     var sel = makeSizeSelect();
@@ -322,11 +324,11 @@ const PAGE = `<!doctype html>
     row.appendChild(x);
     row.appendChild(q);
     row.appendChild(rm);
-    $('packRows').appendChild(row);
+    container.appendChild(row);
   }
-  function gatherPacks() {
+  function gatherPacks(container) {
     var out = [];
-    var rows = $('packRows').querySelectorAll('.pack-row');
+    var rows = container.querySelectorAll('.pack-row');
     for (var i = 0; i < rows.length; i++) {
       var size = parseInt(rows[i].querySelector('select').value, 10);
       var qty = parseInt(rows[i].querySelector('input').value, 10);
@@ -334,7 +336,7 @@ const PAGE = `<!doctype html>
     }
     return out;
   }
-  $('addPackBtn').addEventListener('click', function () { addPackRow(); });
+  $('addPackBtn').addEventListener('click', function () { addPackRow($('packRows')); });
 
   function syncPack() { show($('packWrap'), $('tier').value !== 'enterprise'); }
   $('tier').addEventListener('change', syncPack);
@@ -352,7 +354,7 @@ const PAGE = `<!doctype html>
       contact_email: $('email').value.trim()
     };
     if (payload.tier !== 'enterprise') {
-      var packs = gatherPacks();
+      var packs = gatherPacks($('packRows'));
       if (packs.length > 0) payload.packs = packs;
     }
     var term = $('term').value;
@@ -457,6 +459,37 @@ const PAGE = `<!doctype html>
     b.appendChild(modalRow('Binding', l.active_instances > 0 ? 'Bound' : 'Unbound'));
     b.appendChild(modalRow('Status', l.revoked_at ? 'Revoked' : 'Active'));
   }
+  function editPacks(l) {
+    var wrap = document.createElement('div');
+    wrap.className = 'modal-edit-packs';
+    var head = document.createElement('div');
+    head.className = 'packs-head';
+    var lab = document.createElement('span');
+    lab.className = 'k';
+    lab.textContent = 'Endpoint packs';
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'ghost';
+    add.textContent = '+ Add pack';
+    head.appendChild(lab);
+    head.appendChild(add);
+    var rows = document.createElement('div');
+    rows.id = 'edPackRows';
+    add.addEventListener('click', function () { addPackRow(rows); });
+    wrap.appendChild(head);
+    wrap.appendChild(rows);
+    var existing = [];
+    try { existing = JSON.parse(l.packs || '[]'); } catch (e) { existing = []; }
+    if (Array.isArray(existing)) {
+      existing.forEach(function (p) { addPackRow(rows, p.size, p.qty); });
+    }
+    var hint = document.createElement('p');
+    hint.className = 'muted';
+    hint.style.margin = '8px 0 0';
+    hint.textContent = 'Each pack adds its size in managed endpoints and 5x that in devices. Saving updates the live license; the customer clicks Re-check Now (or waits up to a day) to pull the new capacity.';
+    wrap.appendChild(hint);
+    return wrap;
+  }
   function renderEdit(l) {
     var b = $('detailBody');
     b.innerHTML = '';
@@ -464,6 +497,7 @@ const PAGE = `<!doctype html>
     b.appendChild(editField('Contact email', 'edEmail', l.contact_email));
     b.appendChild(editField('Company ID', 'edCompany', l.company_id));
     b.appendChild(editField('Notes', 'edNotes', l.notes));
+    if (l.tier !== 'enterprise') b.appendChild(editPacks(l));
   }
   function setEditMode(on) {
     var l = currentLicense;
@@ -518,15 +552,19 @@ const PAGE = `<!doctype html>
       company_id: $('edCompany').value.trim(),
       notes: $('edNotes').value.trim()
     };
+    if (currentLicense.tier !== 'enterprise') payload.packs = gatherPacks($('edPackRows'));
     api('/admin/license/update', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload)
-    }).then(function () {
+    }).then(function (d) {
       currentLicense.issued_to_org = payload.issued_to_org;
       currentLicense.contact_email = payload.contact_email;
       currentLicense.company_id = payload.company_id || null;
       currentLicense.notes = payload.notes || null;
+      if (d && d.packs !== undefined) {
+        currentLicense.packs = (d.packs && d.packs.length > 0) ? JSON.stringify(d.packs) : null;
+      }
       setEditMode(false);
       loadList();
     }).catch(function (err) { alert(err.message); });

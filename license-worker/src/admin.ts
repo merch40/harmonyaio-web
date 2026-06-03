@@ -28,6 +28,7 @@ interface AdminUpdateRequest {
   contact_email?: string;
   company_id?: string;
   notes?: string;
+  packs?: Pack[];
 }
 
 // Tiers that can be issued as a key. "home" is synthetic (no key needed).
@@ -195,9 +196,11 @@ export async function handleAdminForceRelease(req: Request, env: Env): Promise<R
   return jsonResponse(200, { ok: true, license_key: key, released });
 }
 
-// handleAdminUpdate edits a license's metadata (org, contact, company id, notes).
-// PATCH semantics: only fields present in the body are changed. Does not touch
-// tier / packs / expiry (those are entitlement changes, handled by re-issue).
+// handleAdminUpdate edits a license's metadata (org, contact, company id, notes)
+// and its endpoint packs. PATCH semantics: only fields present in the body are
+// changed. Editing packs is how an upsell ("add a 10-pack") lands on an existing
+// key: the next /validate rebuilds the blob from this row, so the customer's
+// server grows on its next re-check. Tier and expiry stay re-issue territory.
 export async function handleAdminUpdate(req: Request, env: Env): Promise<Response> {
   await requireAdminAuth(req, env);
   const body = (await safeJSON(req)) as AdminUpdateRequest | null;
@@ -212,12 +215,25 @@ export async function handleAdminUpdate(req: Request, env: Env): Promise<Respons
   const companyId = body?.company_id !== undefined ? body.company_id.trim() || null : existing.company_id;
   const notes = body?.notes !== undefined ? body.notes.trim() || null : existing.notes;
 
+  // Packs: when present, re-itemize and fold into the stored totals. Enterprise
+  // is unlimited, so packs never apply there.
+  let packsJSON = existing.packs;
+  let packEndpointTotal = existing.pack_size;
+  if (body?.packs !== undefined) {
+    const packs = normalizePacks(body.packs);
+    if (packs.length > 0 && existing.tier === "enterprise") {
+      throw badRequest("enterprise is unlimited; packs do not apply");
+    }
+    packsJSON = packs.length > 0 ? JSON.stringify(packs) : null;
+    packEndpointTotal = packs.reduce((sum, p) => sum + p.size * p.qty, 0);
+  }
+
   await env.DB.prepare(
-    `UPDATE licenses SET issued_to_org = ?2, contact_email = ?3, company_id = ?4, notes = ?5 WHERE license_key = ?1`,
+    `UPDATE licenses SET issued_to_org = ?2, contact_email = ?3, company_id = ?4, notes = ?5, packs = ?6, pack_size = ?7 WHERE license_key = ?1`,
   )
-    .bind(key, org, email, companyId, notes)
+    .bind(key, org, email, companyId, notes, packsJSON, packEndpointTotal)
     .run();
-  return jsonResponse(200, { ok: true, license_key: key });
+  return jsonResponse(200, { ok: true, license_key: key, packs: packsJSON ? (JSON.parse(packsJSON) as Pack[]) : [] });
 }
 
 // ---------------- admin session (password login) ----------------

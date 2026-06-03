@@ -320,3 +320,51 @@ describe("edit metadata", () => {
     expect(r.status).toBe(401);
   });
 });
+
+describe("edit packs (upsell)", () => {
+  it("adding a pack to a bound license grows it on the next validate", async () => {
+    const key = (
+      (await (
+        await issue(cookie, { tier: "professional", issued_to_org: "Grow Co", contact_email: "g@x.example" })
+      ).json()) as { license_key: string }
+    ).license_key;
+
+    // Customer activates -> plain Professional caps.
+    const first = await activatedCaps(key, "inst-grow");
+    expect(first.caps.max_agents_total).toBe(20);
+    expect(first.caps.max_devices).toBe(100);
+
+    // Admin adds a 10-pack to the existing key (the upsell).
+    const upd = await SELF.fetch("https://license.test/admin/license/update", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ license_key: key, packs: [{ size: 10, qty: 1 }] }),
+    });
+    expect(upd.status).toBe(200);
+
+    // The same bound instance re-validates -> blob now reflects +10 / +50.
+    const reval = await SELF.fetch("https://license.test/validate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ license_key: key, instance_id: "inst-grow" }),
+    });
+    expect(reval.status).toBe(200);
+    const blob = (await reval.json()) as Blob;
+    expect(blob.caps.max_agents_total).toBe(30);
+    expect(blob.caps.max_devices).toBe(150);
+  });
+
+  it("rejects packs on enterprise", async () => {
+    const key = (
+      (await (
+        await issue(cookie, { tier: "enterprise", issued_to_org: "Ent Co", contact_email: "e@x.example" })
+      ).json()) as { license_key: string }
+    ).license_key;
+    const r = await SELF.fetch("https://license.test/admin/license/update", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ license_key: key, packs: [{ size: 10, qty: 1 }] }),
+    });
+    expect(r.status).toBe(400);
+  });
+});
