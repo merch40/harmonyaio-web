@@ -239,3 +239,30 @@ export async function forceReleaseLicense(db: D1Database, licenseKey: string): P
     .run();
   return res.meta?.changes ?? 0;
 }
+
+// releaseOtherInstanceBindings frees every active binding this instance still
+// holds for a DIFFERENT license key, returning the keys it released. Called on
+// activate so an in-place key swap (e.g. a tier upgrade where the operator hits
+// Apply without releasing first) auto-frees the old key instead of leaving it
+// bound. Scoped to this one instance, so a customer's other servers are untouched.
+export async function releaseOtherInstanceBindings(
+  db: D1Database,
+  instanceId: string,
+  keepLicenseKey: string,
+): Promise<string[]> {
+  const { results } = await db
+    .prepare(
+      "SELECT license_key FROM instances WHERE instance_id = ?1 AND license_key != ?2 AND released_at IS NULL",
+    )
+    .bind(instanceId, keepLicenseKey)
+    .all<{ license_key: string }>();
+  const keys = (results ?? []).map((r) => r.license_key);
+  if (keys.length === 0) return [];
+  await db
+    .prepare(
+      "UPDATE instances SET released_at = ?3 WHERE instance_id = ?1 AND license_key != ?2 AND released_at IS NULL",
+    )
+    .bind(instanceId, keepLicenseKey, nowISO())
+    .run();
+  return keys;
+}

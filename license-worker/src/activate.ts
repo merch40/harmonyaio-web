@@ -5,6 +5,7 @@ import {
   getInstance,
   getLicense,
   logActivation,
+  releaseOtherInstanceBindings,
   upsertInstance,
 } from "./db";
 import { enforceRateLimits, clientIP } from "./rate_limit";
@@ -70,6 +71,24 @@ export async function handleActivate(req: Request, env: Env): Promise<Response> 
     server_version: body.server_version,
     hostname_hash: body.hostname_hash,
   });
+
+  // In-place key swap (e.g. a tier upgrade where the operator hits Apply without
+  // releasing first): free any other key this same server was still bound to, so
+  // the old key doesn't linger as a stale "Bound" binding.
+  const releasedKeys = await releaseOtherInstanceBindings(
+    env.DB,
+    body.instance_id,
+    license.license_key,
+  );
+  for (const releasedKey of releasedKeys) {
+    await logActivation(env.DB, {
+      license_key: releasedKey,
+      instance_id: body.instance_id,
+      event: "release",
+      result: "success",
+      reason: "auto-released: server activated " + license.license_key,
+    });
+  }
 
   const blob = await buildLicenseBlob(
     license,

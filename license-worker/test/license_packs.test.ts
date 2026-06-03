@@ -368,3 +368,36 @@ describe("edit packs (upsell)", () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe("in-place key swap (tier upgrade)", () => {
+  async function issueKey(tier: string, org: string): Promise<string> {
+    const r = await issue(cookie, { tier, issued_to_org: org, contact_email: "u@x.example" });
+    expect(r.status).toBe(200);
+    return ((await r.json()) as { license_key: string }).license_key;
+  }
+
+  it("activating a new key on the same server auto-releases the old key", async () => {
+    const biz = await issueKey("business", "Up Co");
+    const ent = await issueKey("enterprise", "Up Co");
+
+    // Same server (instance) activates Business, then upgrades to Enterprise in place.
+    expect((await activate(biz, "inst-up")).status).toBe(200);
+    expect((await activate(ent, "inst-up")).status).toBe(200);
+
+    const list = await SELF.fetch("https://license.test/admin/licenses", { headers: { cookie } });
+    const body = (await list.json()) as {
+      licenses: Array<{ license_key: string; active_instances: number }>;
+    };
+    expect(body.licenses.find((l) => l.license_key === biz)?.active_instances).toBe(0); // freed
+    expect(body.licenses.find((l) => l.license_key === ent)?.active_instances).toBe(1); // bound
+  });
+
+  it("the auto-released old key can then bind to a different server", async () => {
+    const biz = await issueKey("business", "Free Co");
+    const ent = await issueKey("enterprise", "Free Co");
+    await activate(biz, "inst-a");
+    await activate(ent, "inst-a"); // swap: biz auto-released from inst-a
+    // biz is free again, so it activates cleanly on a different server (no instance_mismatch).
+    expect((await activate(biz, "inst-b")).status).toBe(200);
+  });
+});
