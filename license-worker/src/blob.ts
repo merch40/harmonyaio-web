@@ -1,5 +1,4 @@
 import { signLicense } from "./sign";
-import { plus30DaysISO } from "./db";
 import type { Caps, Features, License, LicenseRow, Pack, Tier } from "./types";
 
 const SIGNING_KEY_ID = "v1";
@@ -8,6 +7,11 @@ const SCHEMA_VERSION = 1;
 // Each endpoint pack also grants this multiple of its size in device inventory.
 // A 10-endpoint pack therefore adds 10 managed endpoints and 50 devices.
 const DEVICES_PER_ENDPOINT = 5;
+
+// Sentinel expiry for perpetual licenses: far enough out it never triggers expiry
+// handling, and recognized by the server and dashboard as "Perpetual". Using a
+// real (far-future) date keeps the blob's expires_at a valid RFC 3339 string.
+const PERPETUAL_EXPIRY = "9999-12-31T23:59:59Z";
 
 // Base caps per tier, before packs. Ladder: Home < Professional < Business < Enterprise.
 // Per-tenant agent caps are unlimited (-1); the org-wide total (max_agents_total) and
@@ -70,7 +74,10 @@ export async function buildLicenseBlob(
 ): Promise<License> {
   const tier = license.tier as Tier;
   const issuedAt = opts.issuedAt ?? license.issued_at;
-  const expiresAt = opts.expiresAt ?? plus30DaysISO();
+  // Carry the REAL subscription expiry so the server can display it and warn
+  // before it lapses, instead of a rolling heartbeat. Perpetual licenses (no row
+  // expiry) get a far-future sentinel the server/dashboard render as "Perpetual".
+  const expiresAt = opts.expiresAt ?? license.expires_at ?? PERPETUAL_EXPIRY;
 
   const caps = capsForTier(tier);
   const extraEndpoints = packEndpoints(parsePacks(license.packs));

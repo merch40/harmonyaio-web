@@ -401,3 +401,25 @@ describe("in-place key swap (tier upgrade)", () => {
     expect((await activate(biz, "inst-b")).status).toBe(200);
   });
 });
+
+describe("blob subscription expiry", () => {
+  it("a perpetual license gets a far-future sentinel (renders as Perpetual)", async () => {
+    const key = (
+      (await (
+        await issue(cookie, { tier: "enterprise", issued_to_org: "Perp Co", contact_email: "p@x.example" })
+      ).json()) as { license_key: string }
+    ).license_key;
+    const blob = (await (await activate(key, "inst-perp")).json()) as { expires_at: string };
+    expect(new Date(blob.expires_at).getUTCFullYear()).toBeGreaterThanOrEqual(9000);
+  });
+
+  it("a termed license carries its real expiry in the blob, not a 30-day heartbeat", async () => {
+    const issued = (await (
+      await issue(cookie, { tier: "professional", issued_to_org: "Yr Co", contact_email: "y@x.example", term: "annual" })
+    ).json()) as { license_key: string; expires_at: string };
+    const blob = (await (await activate(issued.license_key, "inst-yr")).json()) as { expires_at: string };
+    expect(blob.expires_at).toBe(issued.expires_at); // blob mirrors the D1 subscription expiry
+    const daysOut = (Date.parse(blob.expires_at) - Date.now()) / 86400000;
+    expect(daysOut).toBeGreaterThan(300); // ~1 year out, not a rolling +30 days
+  });
+});
