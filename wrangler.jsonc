@@ -6,5 +6,15 @@
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "404-page"
+  },
+  "vars": {
+    // Base URL the release resolver fetches channel pointers from and
+    // builds artifact URLs against. Front Door custom domain in front of
+    // the paazharupdatescf9d 'updates' container (ADR 0028).
+    "UPDATE_ORIGIN": "https://updates.harmonyaio.com",
+    // Channel the install one-liners get when they do not ask for one.
+    // Flip to "stable" once the first stable release is published.
+    "DEFAULT_CHANNEL": "dogfood",
+    "ALLOWED_CHANNELS": "dogfood,stable"
   }
 }

@@ -1,500 +1,310 @@
 #!/usr/bin/env bash
-# install.sh -- Harmony AIO Agent installer for Linux
+# Harmony AIO Server - hosted one-liner installer (Linux, amd64, systemd)
 #
-# Installs the harmony-agent binary as a systemd service on a Linux host,
-# writes /etc/harmony/agent.json so the agent knows which server to call,
-# and leaves a persistent log at /var/log/harmony-install.log.
+#   curl -fsSL https://harmonyaio.com/install.sh | bash
 #
-# Server URL precedence (highest to lowest):
-#   1. --server-url command-line argument
-#   2. HARMONY_SERVER environment variable
-#   3. Worker-injected default (when served from harmonyaio.com with ?server=)
+# Resolves the latest signed release for a channel through the
+# harmonyaio.com release resolver, downloads the tarball from the update
+# origin, verifies its SHA-256 and size against the signed manifest values,
+# then runs the tarball's bundled install.sh and starts the service.
 #
-# Binary source: if neither --binary-path nor --binary-url is given, defaults
-# to ${SERVER_URL}/api/agent/download.
+# Trust boundary: when started without root, the download happens as the
+# invoking user, but the hash verification, extraction, and installation
+# all run inside one root-owned temporary directory. Nothing root executes
+# is writable by the invoking user after it has been verified.
 #
-# Simplest invocation (Worker-injected server URL via harmonyaio.com):
-#   curl -sSL "https://harmonyaio.com/install.sh?server=http://your-harmony-server:8420" | sudo bash
+# Environment overrides:
+#   HARMONY_CHANNEL       release channel (resolver default when unset)
+#   HARMONY_REINSTALL=1   allow in-place reinstall/upgrade over an existing install
+#   HARMONY_NO_START=1    install and enable, but do not start the service
+#   HARMONY_DRYRUN=1      resolve, download, verify, and extract only; install
+#                         nothing and touch no system state
+#   HARMONY_RESOLVER_URL  alternate resolver endpoint (testing)
+#   HARMONY_ARTIFACT_URL / HARMONY_ARTIFACT_SHA256
+#                         bypass the resolver with an explicit artifact (testing,
+#                         air-gapped staging); both must be set together
+#   HARMONY_ALLOW_HTTP=1  permit plain-http artifact URLs (testing only)
 #
-# With an env var:
-#   export HARMONY_SERVER=http://192.168.50.115:8420
-#   curl -sSL https://harmonyaio.com/install.sh | sudo -E bash
-#
-# With explicit args (dev / testing):
-#   sudo ./install.sh --server-url http://192.168.50.115:8420 --binary-path /tmp/harmony-agent
-
+# This script never handles secrets. The server prints its one-time setup
+# token to the systemd journal on first start.
 set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+RESOLVER_URL="${HARMONY_RESOLVER_URL:-https://harmonyaio.com/api/releases/latest}"
+BINARY_PATH="/usr/local/bin/harmony-server"
+SERVICE_NAME="harmony-server"
+SERVICE_UNIT="/etc/systemd/system/harmony-server.service"
+DASHBOARD_PORT="8420"
+# Matches internal/updatechannel MaxArtifactBytes; download cap when the
+# resolver did not supply an exact size.
+MAX_ARTIFACT_BYTES=536870912
 
-readonly INSTALL_DIR="/opt/harmony"
-readonly BINARY_PATH="${INSTALL_DIR}/harmony-agent"
-readonly CONFIG_DIR="/etc/harmony"
-readonly CONFIG_PATH="${CONFIG_DIR}/agent.json"
-readonly UNIT_PATH="/etc/systemd/system/harmony-agent.service"
-readonly LOG_PATH="/var/log/harmony-install.log"
-readonly DEFAULT_SERVICE_NAME="harmony-agent"
+log()  { printf '%s\n' "$*"; }
+fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-# ---------------------------------------------------------------------------
-# Color helpers
-# ---------------------------------------------------------------------------
+have() { command -v "$1" >/dev/null 2>&1; }
 
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-NC='\033[0m'  # no color
-
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-
-# log_msg writes a timestamped message to the install log and to stdout.
-log_msg() {
-    local level="$1"
-    local msg="$2"
-    local ts
-    ts="$(date '+%Y-%m-%d %H:%M:%S')"
-    local line="[harmony-install] ${ts} [${level}] ${msg}"
-
-    # Append to persistent log file (create if needed).
-    # The log directory is / (root-level), which is always writable by root.
-    echo "${line}" >> "${LOG_PATH}" 2>/dev/null || true
-
-    case "${level}" in
-        ERROR)   echo -e "${RED}${line}${NC}" >&2 ;;
-        WARN)    echo -e "${YELLOW}${line}${NC}" ;;
-        SUCCESS) echo -e "${GREEN}${line}${NC}" ;;
-        *)       echo -e "${CYAN}[harmony-install]${NC} ${ts} ${msg}" ;;
-    esac
+fetch_stdout() {
+    if have curl; then
+        curl -fsSL "$1"
+    elif have wget; then
+        wget -qO- "$1"
+    else
+        fail "curl or wget is required."
+    fi
 }
 
-log_info()    { log_msg "INFO"    "$1"; }
-log_warn()    { log_msg "WARN"    "$1"; }
-log_error()   { log_msg "ERROR"   "$1"; }
-log_success() { log_msg "SUCCESS" "$1"; }
-
-# ---------------------------------------------------------------------------
-# Rollback state
-# ---------------------------------------------------------------------------
-
-# Track what we've created so we can undo on error.
-CREATED_FILES=()
-SERVICE_ENABLED=false
-SERVICE_STARTED=false
-
-rollback() {
-    log_warn "Rolling back installation..."
-
-    if "${SERVICE_STARTED}"; then
-        log_info "Stopping ${SERVICE_NAME} service..."
-        systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+# fetch_file url dest max_bytes
+# The transfer is capped BEFORE the hash check so a hostile origin cannot
+# fill the disk; an over-cap transfer is caught here or by the exact size
+# comparison afterwards.
+fetch_file() {
+    local url="$1" dest="$2" max="$3"
+    if have curl; then
+        curl -fSL --progress-bar --max-filesize "$max" -o "$dest" "$url" || \
+            fail "Download failed or exceeded the ${max}-byte cap."
+    elif have wget; then
+        # wget has no single-file size cap; bound the stream instead.
+        wget -qO- "$url" | head -c "$((max + 1))" > "$dest" || \
+            fail "Download failed."
+    else
+        fail "curl or wget is required."
     fi
+}
 
-    if "${SERVICE_ENABLED}"; then
-        log_info "Disabling ${SERVICE_NAME} service..."
-        systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
+# Extract a top-level string / number field from a small, flat JSON object.
+# First match wins, so later fields can never override security-relevant
+# earlier ones. The resolver validates every field it emits against strict
+# patterns (no quotes or escapes can appear), and the values are re-checked
+# below before use.
+json_str() { printf '%s' "$1" | tr -d '\n' | grep -o '"'"$2"'"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*:[[:space:]]*"//; s/"$//'; }
+json_num() { printf '%s' "$1" | tr -d '\n' | grep -o '"'"$2"'"[[:space:]]*:[[:space:]]*[0-9][0-9]*' | head -n1 | sed 's/.*:[[:space:]]*//'; }
+
+sha256_of() {
+    if have sha256sum; then
+        sha256sum "$1" | awk '{print $1}'
+    elif have shasum; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        fail "sha256sum or shasum is required."
     fi
+}
 
-    for f in "${CREATED_FILES[@]+"${CREATED_FILES[@]}"}"; do
-        if [[ -f "${f}" ]]; then
-            log_info "Removing ${f}"
-            rm -f "${f}" || true
+main() {
+    log "=== Harmony AIO Server Installer ==="
+    log ""
+
+    local dryrun=false
+    [ "${HARMONY_DRYRUN:-}" = "1" ] && dryrun=true
+
+    # --- Platform checks -------------------------------------------------
+    # A dry run only downloads and extracts, so it may run anywhere bash does.
+    local os arch
+    os="$(uname -s)"
+    arch="$(uname -m)"
+    if [ "$dryrun" = false ]; then
+        [ "$os" = "Linux" ] || fail "This installer supports Linux only (detected: $os). Windows: irm https://harmonyaio.com/install.ps1 | iex"
+        case "$arch" in
+            x86_64|amd64) ;;
+            *) fail "Unsupported architecture: $arch (amd64 only for now)." ;;
+        esac
+        have systemctl || fail "systemd is required (systemctl not found)."
+    fi
+    have tar || fail "tar is required."
+
+    # --- Privileges -------------------------------------------------------
+    local SUDO=""
+    if [ "$dryrun" = false ] && [ "$(id -u)" -ne 0 ]; then
+        if have sudo; then
+            SUDO="sudo"
+            log "Root privileges are required for installation; sudo will prompt if needed."
+        else
+            fail "Run as root, or install sudo: curl -fsSL https://harmonyaio.com/install.sh | sudo bash"
         fi
+    fi
+
+    # --- Existing installation gate --------------------------------------
+    if [ "$dryrun" = false ] && { [ -e "$BINARY_PATH" ] || [ -e "$SERVICE_UNIT" ]; }; then
+        if [ "${HARMONY_REINSTALL:-}" = "1" ]; then
+            log "Existing installation detected; HARMONY_REINSTALL=1 set, continuing with in-place reinstall."
+        elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+            printf 'An existing Harmony server installation was detected.\nReinstall/upgrade in place? Data, config, and logs are preserved. [y/N] ' > /dev/tty
+            local answer=""
+            read -r answer < /dev/tty || answer=""
+            case "$answer" in
+                y|Y|yes|YES) ;;
+                *) fail "Aborted. Re-run with HARMONY_REINSTALL=1 to skip this prompt." ;;
+            esac
+        else
+            fail "Existing installation detected. Re-run with HARMONY_REINSTALL=1 to reinstall/upgrade in place (data is preserved)."
+        fi
+    fi
+
+    # --- Resolve the release ----------------------------------------------
+    local version="" url="" sha256="" size="" channel_out=""
+    if [ -n "${HARMONY_ARTIFACT_URL:-}" ] || [ -n "${HARMONY_ARTIFACT_SHA256:-}" ]; then
+        [ -n "${HARMONY_ARTIFACT_URL:-}" ] && [ -n "${HARMONY_ARTIFACT_SHA256:-}" ] || \
+            fail "HARMONY_ARTIFACT_URL and HARMONY_ARTIFACT_SHA256 must be set together."
+        url="$HARMONY_ARTIFACT_URL"
+        sha256="$HARMONY_ARTIFACT_SHA256"
+        version="manual"
+        channel_out="manual"
+        log "Using explicit artifact override (resolver bypassed)."
+    else
+        local resolver="$RESOLVER_URL?os=linux"
+        if [ -n "${HARMONY_CHANNEL:-}" ]; then
+            case "$HARMONY_CHANNEL" in
+                *[!A-Za-z0-9._-]*) fail "Invalid HARMONY_CHANNEL value." ;;
+            esac
+            resolver="$resolver&channel=$HARMONY_CHANNEL"
+        fi
+        log "Resolving latest release..."
+        local response
+        response="$(fetch_stdout "$resolver")" || fail "Could not reach the release resolver at $resolver"
+        version="$(json_str "$response" version)"
+        url="$(json_str "$response" url)"
+        sha256="$(json_str "$response" sha256)"
+        size="$(json_num "$response" size)"
+        channel_out="$(json_str "$response" channel)"
+        if [ -z "$version" ] || [ -z "$url" ] || [ -z "$sha256" ]; then
+            fail "Unexpected resolver response: $response"
+        fi
+    fi
+
+    case "$version" in
+        *[!A-Za-z0-9.+_-]*) fail "Resolver returned an invalid version string." ;;
+    esac
+    printf '%s' "$sha256" | grep -Eq '^[0-9a-fA-F]{64}$' || fail "Resolver returned an invalid sha256."
+    case "$url" in
+        https://*) ;;
+        http://*)
+            [ "${HARMONY_ALLOW_HTTP:-}" = "1" ] || fail "Refusing a non-HTTPS artifact URL (set HARMONY_ALLOW_HTTP=1 only for local testing)."
+            ;;
+        *) fail "Resolver returned an invalid artifact URL." ;;
+    esac
+    sha256="$(printf '%s' "$sha256" | tr 'A-F' 'a-f')"
+
+    log "  Channel: ${channel_out:-default}"
+    log "  Version: $version"
+    log "  Source:  $url"
+    log ""
+
+    # --- Download and verify (as the invoking user) ------------------------
+    local workdir
+    workdir="$(mktemp -d /tmp/harmony-install.XXXXXX)"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$workdir'" EXIT
+    trap 'exit 130' INT TERM
+
+    local cap="$MAX_ARTIFACT_BYTES"
+    [ -n "${size:-}" ] && cap="$size"
+    local artifact="$workdir/$(basename "$url")"
+    log "Downloading..."
+    fetch_file "$url" "$artifact" "$cap"
+
+    log "Verifying SHA-256..."
+    local actual
+    actual="$(sha256_of "$artifact")"
+    if [ "$actual" != "$sha256" ]; then
+        fail "SHA-256 mismatch: expected $sha256, got $actual. Aborting."
+    fi
+    if [ -n "${size:-}" ]; then
+        local actual_size
+        actual_size="$(wc -c < "$artifact" | tr -d '[:space:]')"
+        [ "$actual_size" = "$size" ] || fail "Size mismatch: expected $size bytes, got $actual_size. Aborting."
+    fi
+    log "Verified."
+
+    if [ "$dryrun" = true ]; then
+        log "Extracting..."
+        tar xzf "$artifact" -C "$workdir"
+        local pkgdir
+        pkgdir="$(find "$workdir" -mindepth 1 -maxdepth 1 -type d -name 'harmony-server-*' | head -n1)"
+        [ -n "$pkgdir" ] && [ -f "$pkgdir/install.sh" ] || fail "Package layout unexpected: bundled install.sh not found."
+        log ""
+        log "=== Dry run complete: v$version resolved, downloaded, verified, and extracted ==="
+        log "    Package: $(basename "$pkgdir") (binary, dashboard/, bin/, install.sh present: yes)"
+        [ -f "$pkgdir/harmony-server" ] || log "    WARNING: harmony-server binary missing from package"
+        return 0
+    fi
+
+    # --- Re-verify, extract, and install inside a root-owned directory -----
+    # Root re-hashes its own private copy before extracting, so the invoking
+    # user cannot swap bytes between the check above and execution as root.
+    log "Extracting and installing (root)..."
+    $SUDO bash -s -- "$artifact" "$sha256" "$SERVICE_NAME" <<'ROOTEOF'
+set -euo pipefail
+artifact="$1"; expected="$2"; service="$3"
+rootdir="$(mktemp -d /tmp/harmony-install-root.XXXXXX)"
+trap 'rm -rf "$rootdir"' EXIT
+trap 'exit 130' INT TERM
+cp -- "$artifact" "$rootdir/package.tar.gz"
+actual="$(sha256sum "$rootdir/package.tar.gz" | awk '{print $1}')"
+if [ "$actual" != "$expected" ]; then
+    echo "ERROR: root-side SHA-256 mismatch: expected $expected, got $actual. Aborting." >&2
+    exit 1
+fi
+tar xzf "$rootdir/package.tar.gz" -C "$rootdir"
+pkgdir="$(find "$rootdir" -mindepth 1 -maxdepth 1 -type d -name 'harmony-server-*' | head -n1)"
+if [ -z "$pkgdir" ] || [ ! -f "$pkgdir/install.sh" ]; then
+    echo "ERROR: Package layout unexpected: bundled install.sh not found." >&2
+    exit 1
+fi
+if systemctl is-active --quiet "$service" 2>/dev/null; then
+    echo "Stopping running service for upgrade..."
+    systemctl stop "$service"
+fi
+bash "$pkgdir/install.sh"
+ROOTEOF
+
+    # --- Start and report ---------------------------------------------------
+    if [ "${HARMONY_NO_START:-}" = "1" ]; then
+        log ""
+        log "HARMONY_NO_START=1 set: service installed and enabled but not started."
+        log "Start it with: sudo systemctl start $SERVICE_NAME"
+        return 0
+    fi
+
+    log "Starting $SERVICE_NAME..."
+    $SUDO systemctl start "$SERVICE_NAME"
+
+    local tries=0
+    while [ $tries -lt 20 ]; do
+        if systemctl is-active --quiet "$SERVICE_NAME"; then
+            break
+        fi
+        tries=$((tries + 1))
+        sleep 1
     done
-
-    # Remove the install dir only if it's now empty (don't wipe pre-existing data).
-    if [[ -d "${INSTALL_DIR}" ]] && [[ -z "$(ls -A "${INSTALL_DIR}" 2>/dev/null)" ]]; then
-        rmdir "${INSTALL_DIR}" 2>/dev/null || true
-    fi
-
-    if [[ -d "${CONFIG_DIR}" ]] && [[ -z "$(ls -A "${CONFIG_DIR}" 2>/dev/null)" ]]; then
-        rmdir "${CONFIG_DIR}" 2>/dev/null || true
-    fi
-
-    # Reload systemd so the removed unit file is forgotten.
-    systemctl daemon-reload 2>/dev/null || true
-
-    log_warn "Rollback complete.  Nothing was installed."
-}
-
-# err_handler is called by the ERR trap.  Performs rollback then exits 1.
-err_handler() {
-    local exit_code="$?"
-    local line_no="${1:-}"
-    log_error "Unexpected error (exit ${exit_code}) at line ${line_no}.  Starting rollback."
-    rollback
-    exit 1
-}
-
-# ---------------------------------------------------------------------------
-# Argument parsing
-# ---------------------------------------------------------------------------
-
-# Worker-injected default.  When this script is served from harmonyaio.com,
-# the Cloudflare Worker replaces the placeholder below with the value of the
-# ?server= query string after sanitization.  Anything left as the literal
-# placeholder token is treated as unset and we fall through to the env var
-# and then the command-line arg.
-SERVER_URL="__HARMONY_SERVER_URL__"
-BINARY_SRC_PATH=""
-BINARY_SRC_URL=""
-FORCE=false
-SERVICE_NAME="${DEFAULT_SERVICE_NAME}"
-
-usage() {
-    cat <<EOF
-Usage: sudo $0 [--server-url URL] [--binary-path PATH | --binary-url URL] [OPTIONS]
-
-Server URL (one of):
-  --server-url URL        Harmony server URL the agent phones home to
-  HARMONY_SERVER env var  Fallback when --server-url is not given
-  ?server= query string   Set automatically when served from harmonyaio.com
-
-Binary source (optional, defaults to \${SERVER_URL}/api/agent/download):
-  --binary-path PATH      Local path to the harmony-agent Linux binary
-  --binary-url  URL       URL to download the harmony-agent binary from
-
-Options:
-  --force                 Re-install even if agent is already running
-  --service-name NAME     Systemd service name (default: ${DEFAULT_SERVICE_NAME})
-  -h, --help              Show this message
-
-Examples:
-  curl -sSL "https://harmonyaio.com/install.sh?server=http://192.168.50.115:8420" | sudo bash
-  HARMONY_SERVER=http://192.168.50.115:8420 sudo -E ./install.sh
-  sudo ./install.sh --server-url http://192.168.50.115:8420 --binary-path /tmp/harmony-agent
-EOF
-}
-
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --server-url)
-            SERVER_URL="${2:?--server-url requires a value}"
-            shift 2
-            ;;
-        --binary-path)
-            BINARY_SRC_PATH="${2:?--binary-path requires a value}"
-            shift 2
-            ;;
-        --binary-url)
-            BINARY_SRC_URL="${2:?--binary-url requires a value}"
-            shift 2
-            ;;
-        --force)
-            FORCE=true
-            shift
-            ;;
-        --service-name)
-            SERVICE_NAME="${2:?--service-name requires a value}"
-            shift 2
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        *)
-            log_error "Unknown argument: $1"
-            usage >&2
-            exit 1
-            ;;
-    esac
-done
-
-# ---------------------------------------------------------------------------
-# Pre-flight checks
-# ---------------------------------------------------------------------------
-
-# Must run as root.
-if [[ "${EUID}" -ne 0 ]]; then
-    echo -e "${RED}[harmony-install] ERROR: This script must be run as root (use sudo).${NC}" >&2
-    exit 1
-fi
-
-# Apply the fallback chain for the server URL now that args are parsed.  If
-# the arg wasn't passed and the Worker left the placeholder in place, check
-# the environment variable.  If that's also empty, wipe SERVER_URL so the
-# validation below trips the clean error path.
-if [[ "${SERVER_URL}" == "__HARMONY_SERVER_URL__" ]]; then
-    if [[ -n "${HARMONY_SERVER:-}" ]]; then
-        SERVER_URL="${HARMONY_SERVER}"
-    else
-        SERVER_URL=""
-    fi
-fi
-
-# Validate required arguments.
-if [[ -z "${SERVER_URL}" ]]; then
-    log_error "Server URL is required.  Provide one of:"
-    log_error "  --server-url http://your-harmony-server:8420"
-    log_error "  HARMONY_SERVER=http://your-harmony-server:8420 (env var)"
-    log_error "  Use the pre-configured URL: https://harmonyaio.com/install.sh?server=http://your-harmony-server:8420"
-    usage >&2
-    exit 1
-fi
-
-# Default the binary source to the server's agent download endpoint if the
-# caller didn't pin a local path or an explicit URL.  This is the hands-off
-# path that makes the one-liner work: the agent always ships alongside the
-# server it reports to.
-if [[ -z "${BINARY_SRC_PATH}" && -z "${BINARY_SRC_URL}" ]]; then
-    BINARY_SRC_URL="${SERVER_URL%/}/api/agent/download"
-fi
-
-if [[ -n "${BINARY_SRC_PATH}" && -n "${BINARY_SRC_URL}" ]]; then
-    log_error "--binary-path and --binary-url are mutually exclusive."
-    usage >&2
-    exit 1
-fi
-
-# Check systemd is available.
-if ! command -v systemctl &>/dev/null; then
-    log_error "systemctl not found.  This installer requires a systemd-based Linux distribution."
-    exit 1
-fi
-
-# ---------------------------------------------------------------------------
-# Idempotency check
-# ---------------------------------------------------------------------------
-
-# If the service is already active and the config already matches, we're done.
-if ! "${FORCE}"; then
-    if systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
-        if [[ -f "${CONFIG_PATH}" ]]; then
-            existing_url=""
-            # Extract server_url value with basic shell parsing (no jq dependency).
-            existing_url="$(grep -o '"server_url"[[:space:]]*:[[:space:]]*"[^"]*"' "${CONFIG_PATH}" \
-                            | grep -o '"[^"]*"$' | tr -d '"' || true)"
-            if [[ "${existing_url}" == "${SERVER_URL}" ]]; then
-                log_success "harmony-agent is already installed and running with the correct server URL.  Nothing to do."
-                log_info "Run with --force to reinstall."
-                exit 0
-            else
-                log_warn "Service is running but server URL has changed (${existing_url} -> ${SERVER_URL}).  Use --force to update."
-                exit 0
-            fi
-        fi
-    fi
-fi
-
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
-
-echo ""
-echo -e "${CYAN}=== Harmony AIO Agent Installer ===${NC}"
-log_info "Starting installation"
-log_info "Server URL:   ${SERVER_URL}"
-log_info "Service name: ${SERVICE_NAME}"
-log_info "Install dir:  ${INSTALL_DIR}"
-log_info "Log file:     ${LOG_PATH}"
-echo ""
-
-# Enable the ERR trap now that pre-flight is done.
-trap 'err_handler ${LINENO}' ERR
-
-# ---------------------------------------------------------------------------
-# Step 1: Acquire binary
-# ---------------------------------------------------------------------------
-
-log_info "Step 1/7: Acquiring binary..."
-
-STAGING_BINARY=""
-
-if [[ -n "${BINARY_SRC_PATH}" ]]; then
-    # Local path provided.
-    if [[ ! -f "${BINARY_SRC_PATH}" ]]; then
-        log_error "Binary not found at ${BINARY_SRC_PATH}"
-        exit 1
-    fi
-    STAGING_BINARY="${BINARY_SRC_PATH}"
-    log_info "Using local binary: ${BINARY_SRC_PATH}"
-else
-    # Download the binary.
-    STAGING_BINARY="$(mktemp /tmp/harmony-agent-XXXXXX)"
-    CREATED_FILES+=("${STAGING_BINARY}")
-
-    log_info "Downloading binary from ${BINARY_SRC_URL} ..."
-    if command -v curl &>/dev/null; then
-        curl -fsSL --progress-bar -o "${STAGING_BINARY}" "${BINARY_SRC_URL}"
-    elif command -v wget &>/dev/null; then
-        wget -q --show-progress -O "${STAGING_BINARY}" "${BINARY_SRC_URL}"
-    else
-        log_error "Neither curl nor wget found.  Install one and retry, or use --binary-path."
-        exit 1
-    fi
-    log_info "Download complete."
-fi
-
-# Sanity-check: verify it looks like an ELF binary (Linux executable).
-magic_bytes="$(xxd -l 4 -p "${STAGING_BINARY}" 2>/dev/null || od -A n -N 4 -t x1 "${STAGING_BINARY}" 2>/dev/null | tr -d ' \n' || true)"
-if [[ "${magic_bytes}" != "7f454c46"* ]]; then
-    log_warn "Binary does not appear to be a Linux ELF executable (magic: ${magic_bytes}).  Proceeding anyway."
-fi
-
-# ---------------------------------------------------------------------------
-# Step 2: Create install directory
-# ---------------------------------------------------------------------------
-
-log_info "Step 2/7: Creating install directory ${INSTALL_DIR} ..."
-
-DIR_CREATED=false
-if [[ ! -d "${INSTALL_DIR}" ]]; then
-    install -d -m 0755 -o root -g root "${INSTALL_DIR}"
-    DIR_CREATED=true
-fi
-
-# ---------------------------------------------------------------------------
-# Step 3: Install binary
-# ---------------------------------------------------------------------------
-
-log_info "Step 3/7: Installing binary to ${BINARY_PATH} ..."
-
-BINARY_WAS_NEW=false
-if [[ ! -f "${BINARY_PATH}" ]]; then
-    BINARY_WAS_NEW=true
-fi
-
-install -D -m 0755 -o root -g root "${STAGING_BINARY}" "${BINARY_PATH}"
-
-if "${BINARY_WAS_NEW}"; then
-    CREATED_FILES+=("${BINARY_PATH}")
-fi
-
-# Clean up temp file if we downloaded it.
-if [[ -n "${BINARY_SRC_URL}" && -f "${STAGING_BINARY}" && "${STAGING_BINARY}" != "${BINARY_PATH}" ]]; then
-    rm -f "${STAGING_BINARY}" || true
-    # Remove from CREATED_FILES since we've already cleaned it up.
-    CREATED_FILES=("${CREATED_FILES[@]/${STAGING_BINARY}/}")
-fi
-
-log_info "Binary installed ($(du -h "${BINARY_PATH}" | cut -f1))."
-
-# ---------------------------------------------------------------------------
-# Step 4: Write /etc/harmony/agent.json
-# ---------------------------------------------------------------------------
-
-log_info "Step 4/7: Writing ${CONFIG_PATH} ..."
-
-CONFIG_WAS_NEW=false
-if [[ ! -f "${CONFIG_PATH}" ]]; then
-    CONFIG_WAS_NEW=true
-fi
-
-install -d -m 0755 -o root -g root "${CONFIG_DIR}"
-
-# Write the config using printf to avoid trailing newline ambiguity.
-printf '{"server_url":"%s"}\n' "${SERVER_URL}" > "${CONFIG_PATH}"
-chmod 0644 "${CONFIG_PATH}"
-chown root:root "${CONFIG_PATH}"
-
-if "${CONFIG_WAS_NEW}"; then
-    CREATED_FILES+=("${CONFIG_PATH}")
-fi
-
-log_info "agent.json written (server_url: ${SERVER_URL})."
-
-# ---------------------------------------------------------------------------
-# Step 5: Write systemd unit file
-# ---------------------------------------------------------------------------
-
-log_info "Step 5/7: Writing systemd unit file to ${UNIT_PATH} ..."
-
-UNIT_WAS_NEW=false
-if [[ ! -f "${UNIT_PATH}" ]]; then
-    UNIT_WAS_NEW=true
-fi
-
-cat > "${UNIT_PATH}" <<'UNIT'
-[Unit]
-Description=Harmony AIO Agent
-Documentation=https://harmonyaio.com
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=root
-ExecStart=/opt/harmony/harmony-agent
-Restart=on-failure
-RestartSec=10s
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=harmony-agent
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-chmod 0644 "${UNIT_PATH}"
-chown root:root "${UNIT_PATH}"
-
-if "${UNIT_WAS_NEW}"; then
-    CREATED_FILES+=("${UNIT_PATH}")
-fi
-
-log_info "Unit file written."
-
-# ---------------------------------------------------------------------------
-# Step 6: Enable and start the service
-# ---------------------------------------------------------------------------
-
-log_info "Step 6/7: Enabling and starting ${SERVICE_NAME}.service ..."
-
-systemctl daemon-reload
-log_info "systemctl daemon-reload done."
-
-systemctl enable "${SERVICE_NAME}.service"
-SERVICE_ENABLED=true
-log_info "Service enabled (starts on boot)."
-
-systemctl start "${SERVICE_NAME}.service"
-SERVICE_STARTED=true
-log_info "Service start command issued."
-
-# ---------------------------------------------------------------------------
-# Step 7: Verify service is active
-# ---------------------------------------------------------------------------
-
-log_info "Step 7/7: Waiting for ${SERVICE_NAME} to become active (up to 30s) ..."
-
-deadline=$(( $(date +%s) + 30 ))
-while (( $(date +%s) < deadline )); do
-    if systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
-        log_success "harmony-agent.service is active."
-        break
-    fi
+    systemctl is-active --quiet "$SERVICE_NAME" || \
+        fail "Service did not reach active state. Inspect: sudo journalctl -u $SERVICE_NAME -n 100 --no-pager"
+
+    # Best-effort: surface the one-time setup token from the journal so the
+    # operator does not have to dig for it. Reissued on every start until
+    # setup completes, so a miss here is only a minor inconvenience.
     sleep 2
-done
+    local token=""
+    token="$($SUDO journalctl -u "$SERVICE_NAME" -n 300 --no-pager -o cat 2>/dev/null | \
+        awk '/HARMONY INITIAL SETUP TOKEN/{getline; gsub(/^[ \t]+|[ \t]+$/, ""); print; exit}')" || token=""
 
-if ! systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
-    log_error "harmony-agent.service did not become active within 30 seconds."
-    log_error "Last journal output:"
-    journalctl -u "${SERVICE_NAME}.service" -n 20 --no-pager 2>/dev/null | while IFS= read -r line; do
-        log_error "  ${line}"
-    done
-    rollback
-    exit 1
-fi
+    local host_ip=""
+    host_ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || host_ip=""
 
-# Disable the ERR trap now that we've succeeded.
-trap - ERR
+    log ""
+    log "=== Harmony AIO Server v$version installed ==="
+    log ""
+    log "  Dashboard:  http://${host_ip:-localhost}:$DASHBOARD_PORT"
+    if [ -n "$token" ]; then
+        log "  Setup:      http://${host_ip:-localhost}:$DASHBOARD_PORT/setup"
+        log "  Setup token: $token"
+    else
+        log "  First-run setup token (printed to the journal on startup):"
+        log "    sudo journalctl -u $SERVICE_NAME -o cat | grep -A 1 'HARMONY INITIAL SETUP TOKEN'"
+    fi
+    log ""
+    log "  Optional hardening: set HARMONY_KEY_PASSPHRASE in /etc/harmony/harmony.env,"
+    log "  then: sudo systemctl restart $SERVICE_NAME"
+    log ""
+    log "  Uninstall: curl -fsSL https://harmonyaio.com/uninstall.sh | bash"
+}
 
-# ---------------------------------------------------------------------------
-# Done
-# ---------------------------------------------------------------------------
-
-echo ""
-log_success "=== Installation complete ==="
-log_success "  Binary:      ${BINARY_PATH}"
-log_success "  Config:      ${CONFIG_PATH}"
-log_success "  Unit file:   ${UNIT_PATH}"
-log_success "  Service:     ${SERVICE_NAME} (active, enabled)"
-log_success "  Log file:    ${LOG_PATH}"
-echo ""
-log_info "The agent will phone home to ${SERVER_URL} on its next heartbeat (within 30s)."
-log_info "To check status:  systemctl status ${SERVICE_NAME}"
-log_info "To view logs:     journalctl -u ${SERVICE_NAME} -f"
-echo ""
+main "$@"

@@ -1,389 +1,228 @@
-# install.ps1 -- Harmony AIO Agent installer for Windows
+# Harmony AIO Server - hosted one-liner installer (Windows, amd64)
 #
-# Installs the harmony-agent binary as a Windows service, writes agent.json
-# next to the binary so the agent knows which server to call, and leaves a
-# persistent log at $env:ProgramData\Harmony\install.log.
+#   irm https://harmonyaio.com/install.ps1 | iex
 #
-# Server URL precedence (highest to lowest):
-#   1. -ServerUrl command-line argument
-#   2. $env:HARMONY_SERVER environment variable
-#   3. Worker-injected default (when served from harmonyaio.com with ?server=)
+# Resolves the latest signed release for a channel through the harmonyaio.com
+# release resolver, downloads the release ZIP from the update origin, verifies
+# its SHA-256 and size against the signed manifest values, then drives the
+# package's own install.ps1 exactly the way the NSIS setup executable does
+# (prepare with -OpenFirewall -NoStart, then -FinalizeOnly to start and
+# health-check the native Windows service).
 #
-# Binary source: if neither -BinaryPath nor -BinaryUrl is given, defaults to
-# ${ServerUrl}/api/agent/download.
+# Environment overrides (parameters cannot be passed through `| iex`):
+#   HARMONY_CHANNEL       release channel (resolver default when unset)
+#   HARMONY_REINSTALL=1   allow reinstall over an existing HarmonyAIOServer service
+#   HARMONY_RESOLVER_URL  alternate resolver endpoint (testing)
+#   HARMONY_ARTIFACT_URL / HARMONY_ARTIFACT_SHA256
+#                         bypass the resolver with an explicit artifact (testing)
+#   HARMONY_DRYRUN=1      resolve, download, verify, and extract only; install
+#                         nothing and touch no system state
 #
-# Simplest invocation (Worker-injected server URL via harmonyaio.com):
-#   iwr "https://harmonyaio.com/install.ps1?server=http://your-harmony-server:8420" | iex
-#
-# With an env var:
-#   $env:HARMONY_SERVER = 'http://192.168.50.115:8420'
-#   iwr https://harmonyaio.com/install.ps1 | iex
-#
-# With explicit args (dev / testing):
-#   .\install.ps1 -ServerUrl http://192.168.50.115:8420 -BinaryPath C:\tmp\harmony-agent.exe
+# Run from an elevated PowerShell session (5.1 or 7+). The inner package
+# installer always executes under 64-bit Windows PowerShell 5.1, matching the
+# setup executable's service and trust contract.
+& {
+    $ErrorActionPreference = 'Stop'
 
-[CmdletBinding()]
-param(
-    # Worker-injected default.  When this script is served from harmonyaio.com,
-    # the Cloudflare Worker replaces the placeholder below with the value of
-    # the ?server= query string after sanitization.  Anything left as the
-    # literal placeholder token is treated as unset and we fall through to
-    # $env:HARMONY_SERVER.
-    [string]$ServerUrl = '__HARMONY_SERVER_URL__',
+    $serviceName = 'HarmonyAIOServer'
+    $legacyTaskName = 'Harmony AIO Server'
+    $installDir = Join-Path $env:ProgramData 'Harmony AIO'
+    $dashboardPort = 8420
+    $defaultResolver = 'https://harmonyaio.com/api/releases/latest'
 
-    [string]$BinaryPath = '',
+    Write-Host '=== Harmony AIO Server Installer ===' -ForegroundColor Cyan
+    Write-Host ''
 
-    [string]$BinaryUrl = '',
+    $dryRun = ($env:HARMONY_DRYRUN -eq '1')
 
-    [switch]$Force,
-
-    [string]$ServiceName = 'HarmonyAgent',
-
-    [string]$InstallDir = (Join-Path $env:ProgramFiles 'Harmony')
-)
-
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-$BinaryDest  = Join-Path $InstallDir 'harmony-agent.exe'
-$ConfigDest  = Join-Path $InstallDir 'agent.json'
-$LogDir      = Join-Path $env:ProgramData 'Harmony'
-$LogPath     = Join-Path $LogDir 'install.log'
-
-# ---------------------------------------------------------------------------
-# Logging helpers
-# ---------------------------------------------------------------------------
-
-function Write-Log {
-    param(
-        [string]$Level,
-        [string]$Message
-    )
-    $ts   = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    $line = "[harmony-install] $ts [$Level] $Message"
-
-    # Append to persistent log (create directory/file as needed).
-    if (-not (Test-Path $LogDir)) {
-        New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+    # --- Platform and privilege checks -----------------------------------
+    if (-not [Environment]::Is64BitOperatingSystem) {
+        throw 'Harmony AIO Server requires 64-bit Windows.'
     }
-    Add-Content -Path $LogPath -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue
-
-    switch ($Level) {
-        'ERROR'   { Write-Host $line -ForegroundColor Red }
-        'WARN'    { Write-Host $line -ForegroundColor Yellow }
-        'SUCCESS' { Write-Host $line -ForegroundColor Green }
-        default   { Write-Host $line -ForegroundColor Cyan }
-    }
-}
-
-function Log-Info    { param([string]$m); Write-Log 'INFO'    $m }
-function Log-Warn    { param([string]$m); Write-Log 'WARN'    $m }
-function Log-Error   { param([string]$m); Write-Log 'ERROR'   $m }
-function Log-Success { param([string]$m); Write-Log 'SUCCESS' $m }
-
-# ---------------------------------------------------------------------------
-# Rollback state
-# ---------------------------------------------------------------------------
-
-$CreatedFiles   = [System.Collections.Generic.List[string]]::new()
-$ServiceCreated = $false
-$ServiceStarted = $false
-
-function Invoke-Rollback {
-    Log-Warn 'Rolling back installation...'
-
-    if ($ServiceStarted) {
-        Log-Info "Stopping service $ServiceName ..."
-        try { Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue } catch {}
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    if (-not $dryRun -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'This installer must run from an elevated PowerShell session. Open PowerShell as Administrator and re-run: irm https://harmonyaio.com/install.ps1 | iex'
     }
 
-    if ($ServiceCreated) {
-        Log-Info "Removing service $ServiceName ..."
-        try {
-            $svc = Get-WmiObject -Class Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue
-            if ($svc) { $svc.Delete() | Out-Null }
-        } catch {}
-        # sc.exe delete as fallback
-        try { sc.exe delete $ServiceName | Out-Null } catch {}
-    }
-
-    foreach ($f in $CreatedFiles) {
-        if (Test-Path $f) {
-            Log-Info "Removing $f"
-            try { Remove-Item -Path $f -Force -ErrorAction SilentlyContinue } catch {}
-        }
-    }
-
-    # Remove install dir if now empty.
-    if (Test-Path $InstallDir) {
-        $remaining = Get-ChildItem -Path $InstallDir -ErrorAction SilentlyContinue
-        if (-not $remaining) {
-            try { Remove-Item -Path $InstallDir -Force -ErrorAction SilentlyContinue } catch {}
-        }
-    }
-
-    Log-Warn 'Rollback complete.  Nothing was installed.'
-}
-
-# ---------------------------------------------------------------------------
-# Pre-flight checks
-# ---------------------------------------------------------------------------
-
-# Must run as Administrator.
-$currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
-if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host '[harmony-install] ERROR: This script must be run as Administrator.' -ForegroundColor Red
-    exit 1
-}
-
-# Apply the fallback chain for the server URL.  If -ServerUrl wasn't passed
-# and the Worker left the placeholder in place, check the environment
-# variable.  If that's also empty, blank $ServerUrl so the validation below
-# trips the clean error path.
-if ($ServerUrl -eq '__HARMONY_SERVER_URL__') {
-    if (-not [string]::IsNullOrWhiteSpace($env:HARMONY_SERVER)) {
-        $ServerUrl = $env:HARMONY_SERVER
+    # The inner installer requires 64-bit Windows PowerShell 5.1. Sysnative
+    # escapes WOW64 redirection if this outer session is a 32-bit host.
+    $winPowerShell = if ([Environment]::Is64BitProcess) {
+        Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     } else {
-        $ServerUrl = ''
+        Join-Path $env:SystemRoot 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
     }
-}
-
-if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
-    Write-Host '[harmony-install] ERROR: Server URL is required.  Provide one of:' -ForegroundColor Red
-    Write-Host '  -ServerUrl http://your-harmony-server:8420' -ForegroundColor Red
-    Write-Host '  $env:HARMONY_SERVER = "http://your-harmony-server:8420" (before running)' -ForegroundColor Red
-    Write-Host '  Or the pre-configured URL:' -ForegroundColor Red
-    Write-Host '  iwr "https://harmonyaio.com/install.ps1?server=http://your-harmony-server:8420" | iex' -ForegroundColor Red
-    exit 1
-}
-
-# Default the binary source to the server's agent download endpoint if the
-# caller didn't pin a local path or an explicit URL.  This is the hands-off
-# path that makes the one-liner work: the agent always ships alongside the
-# server it reports to.
-if (-not [string]::IsNullOrWhiteSpace($BinaryPath) -and -not [string]::IsNullOrWhiteSpace($BinaryUrl)) {
-    Write-Host '[harmony-install] ERROR: -BinaryPath and -BinaryUrl are mutually exclusive.' -ForegroundColor Red
-    exit 1
-}
-
-if ([string]::IsNullOrWhiteSpace($BinaryPath) -and [string]::IsNullOrWhiteSpace($BinaryUrl)) {
-    $BinaryUrl = ($ServerUrl.TrimEnd('/')) + '/api/agent/download'
-}
-
-# ---------------------------------------------------------------------------
-# Idempotency check
-# ---------------------------------------------------------------------------
-
-if (-not $Force) {
-    $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    if ($existingSvc -and $existingSvc.Status -eq 'Running') {
-        if (Test-Path $ConfigDest) {
-            try {
-                $cfg         = Get-Content -Path $ConfigDest -Raw | ConvertFrom-Json
-                $existingUrl = $cfg.server_url
-            } catch {
-                $existingUrl = ''
-            }
-
-            if ($existingUrl -eq $ServerUrl) {
-                Log-Success "harmony-agent is already installed and running with the correct server URL.  Nothing to do."
-                Log-Info    "Run with -Force to reinstall."
-                exit 0
-            } else {
-                Log-Warn "Service is running but server URL has changed ($existingUrl -> $ServerUrl).  Use -Force to update."
-                exit 0
-            }
-        }
+    if (-not (Test-Path -LiteralPath $winPowerShell)) {
+        throw 'The required 64-bit Windows PowerShell 5.1 host is unavailable.'
     }
-}
 
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
+    # TLS 1.2 for Windows PowerShell 5.1 downloads. This is the one piece of
+    # session state the script changes (additive only), including in dry-run,
+    # because the dry-run download needs it too.
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-Write-Host ''
-Write-Host '=== Harmony AIO Agent Installer (Windows) ===' -ForegroundColor Cyan
-Log-Info "Starting installation"
-Log-Info "Server URL:   $ServerUrl"
-Log-Info "Service name: $ServiceName"
-Log-Info "Install dir:  $InstallDir"
-Log-Info "Log file:     $LogPath"
-Write-Host ''
+    # --- Existing installation gate ---------------------------------------
+    # A reinstall over a registered service first runs the verified payload's
+    # own trusted uninstaller (non-purge: data, config, logs, and update
+    # state are preserved) because the packaged installer refuses, by
+    # design, to prepare while a Harmony service or runtime files exist.
+    $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    $reinstall = [bool]$existing -and -not $dryRun
+    if ($reinstall -and $env:HARMONY_REINSTALL -ne '1') {
+        throw ("An existing '{0}' service was detected. Installed servers upgrade through the signed update channel " +
+            "(dashboard: Settings > System > Updates). To force a reinstall over this installation anyway, set " +
+            "`$env:HARMONY_REINSTALL='1' and re-run.") -f $serviceName
+    }
 
-# From here on, all errors go through the catch block for rollback.
-try {
-
-    # -----------------------------------------------------------------------
-    # Step 1: Acquire binary
-    # -----------------------------------------------------------------------
-
-    Log-Info 'Step 1/6: Acquiring binary...'
-
-    $StagingBinary = ''
-
-    if (-not [string]::IsNullOrWhiteSpace($BinaryPath)) {
-        if (-not (Test-Path $BinaryPath)) {
-            throw "Binary not found at $BinaryPath"
+    # --- Resolve the release -----------------------------------------------
+    $release = $null
+    if ($env:HARMONY_ARTIFACT_URL -or $env:HARMONY_ARTIFACT_SHA256) {
+        if (-not ($env:HARMONY_ARTIFACT_URL -and $env:HARMONY_ARTIFACT_SHA256)) {
+            throw 'HARMONY_ARTIFACT_URL and HARMONY_ARTIFACT_SHA256 must be set together.'
         }
-        $StagingBinary = $BinaryPath
-        Log-Info "Using local binary: $BinaryPath"
+        $release = [pscustomobject]@{
+            channel = 'manual'; version = 'manual'
+            url = $env:HARMONY_ARTIFACT_URL; sha256 = $env:HARMONY_ARTIFACT_SHA256; size = 0
+        }
+        Write-Host 'Using explicit artifact override (resolver bypassed).'
     } else {
-        # Download binary to a temp file.
-        $StagingBinary = [System.IO.Path]::GetTempFileName() + '.exe'
-        $CreatedFiles.Add($StagingBinary)
+        $resolver = if ($env:HARMONY_RESOLVER_URL) { $env:HARMONY_RESOLVER_URL } else { $defaultResolver }
+        $uri = $resolver + '?os=windows'
+        if ($env:HARMONY_CHANNEL) {
+            if ($env:HARMONY_CHANNEL -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') {
+                throw 'Invalid HARMONY_CHANNEL value.'
+            }
+            $uri += '&channel=' + [Uri]::EscapeDataString($env:HARMONY_CHANNEL)
+        }
+        Write-Host 'Resolving latest release...'
+        $release = Invoke-RestMethod -UseBasicParsing -Uri $uri
+    }
 
-        Log-Info "Downloading binary from $BinaryUrl ..."
+    if (-not $release.version -or -not $release.url -or -not $release.sha256) {
+        throw "Unexpected resolver response: $($release | ConvertTo-Json -Compress -Depth 3)"
+    }
+    if ($release.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Resolver returned an invalid sha256.' }
+    # Scheme whitelist: https always; http only behind the explicit testing
+    # flag; every other scheme (file:, UNC, ...) is refused outright.
+    if ($release.url -notmatch '^https://') {
+        if ($release.url -notmatch '^http://' -or $env:HARMONY_ALLOW_HTTP -ne '1') {
+            throw 'Refusing a non-HTTPS artifact URL (set HARMONY_ALLOW_HTTP=1 only for local http testing).'
+        }
+    }
+
+    Write-Host ("  Channel: {0}" -f $release.channel)
+    Write-Host ("  Version: {0}" -f $release.version)
+    Write-Host ("  Source:  {0}" -f $release.url)
+    Write-Host ''
+
+    # --- Download and verify -------------------------------------------------
+    $workDir = Join-Path $env:TEMP ('harmony-install-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+    New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+    try {
+        $zipPath = Join-Path $workDir (Split-Path -Leaf ([Uri]$release.url).AbsolutePath)
+        Write-Host 'Downloading...'
+        $previousProgress = $ProgressPreference
         $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri $BinaryUrl -OutFile $StagingBinary -UseBasicParsing
-        $ProgressPreference = 'Continue'
-        Log-Info "Download complete."
-    }
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $release.url -OutFile $zipPath
+        } finally {
+            $ProgressPreference = $previousProgress
+        }
 
-    # Basic sanity check: Windows PE header starts with 'MZ'.
-    $magicBytes = [System.IO.File]::ReadAllBytes($StagingBinary)[0..1]
-    if ($magicBytes[0] -ne 77 -or $magicBytes[1] -ne 90) {
-        Log-Warn "Binary does not start with MZ magic bytes -- may not be a valid Windows PE executable.  Proceeding anyway."
-    }
+        Write-Host 'Verifying SHA-256...'
+        $actual = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $release.sha256.ToLowerInvariant()) {
+            throw "SHA-256 mismatch: expected $($release.sha256), got $actual. Aborting."
+        }
+        if ($release.size -gt 0 -and (Get-Item -LiteralPath $zipPath).Length -ne [int64]$release.size) {
+            throw "Size mismatch: expected $($release.size) bytes. Aborting."
+        }
+        Write-Host 'Verified.'
 
-    # -----------------------------------------------------------------------
-    # Step 2: Create install directory
-    # -----------------------------------------------------------------------
+        Write-Host 'Extracting...'
+        $extractDir = Join-Path $workDir 'payload'
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
+        $payloadRoot = Get-ChildItem -LiteralPath $extractDir -Directory |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'install.ps1') } |
+            Select-Object -First 1
+        if (-not $payloadRoot) { throw 'Package layout unexpected: bundled install.ps1 not found.' }
+        $payload = $payloadRoot.FullName
 
-    Log-Info "Step 2/6: Creating install directory $InstallDir ..."
+        if ($dryRun) {
+            $binaryPresent = Test-Path -LiteralPath (Join-Path $payload 'harmony-server.exe')
+            Write-Host ''
+            Write-Host ("=== Dry run complete: v{0} resolved, downloaded, verified, and extracted ===" -f $release.version) -ForegroundColor Green
+            Write-Host ("    Package: {0} (harmony-server.exe present: {1})" -f $payloadRoot.Name, $binaryPresent)
+            return
+        }
 
-    if (-not (Test-Path $InstallDir)) {
-        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-    }
-
-    # -----------------------------------------------------------------------
-    # Step 3: Copy binary
-    # -----------------------------------------------------------------------
-
-    Log-Info "Step 3/6: Installing binary to $BinaryDest ..."
-
-    $binaryIsNew = -not (Test-Path $BinaryDest)
-
-    Copy-Item -Path $StagingBinary -Destination $BinaryDest -Force
-
-    if ($binaryIsNew) {
-        $CreatedFiles.Add($BinaryDest)
-    }
-
-    # Size for confirmation.
-    $sizeMB = [math]::Round((Get-Item $BinaryDest).Length / 1MB, 2)
-    Log-Info "Binary installed ($sizeMB MB)."
-
-    # Clean up temp download file.
-    if (-not [string]::IsNullOrWhiteSpace($BinaryUrl) -and (Test-Path $StagingBinary) -and $StagingBinary -ne $BinaryDest) {
-        Remove-Item -Path $StagingBinary -Force -ErrorAction SilentlyContinue
-        $CreatedFiles.Remove($StagingBinary) | Out-Null
-    }
-
-    # -----------------------------------------------------------------------
-    # Step 4: Write agent.json next to the binary
-    # -----------------------------------------------------------------------
-    # resolveServerURL() in main.go checks <exeDir>/agent.json on all platforms.
-
-    Log-Info "Step 4/6: Writing $ConfigDest ..."
-
-    $configIsNew = -not (Test-Path $ConfigDest)
-    $configJson  = "{`"server_url`":`"$ServerUrl`"}"
-    Set-Content -Path $ConfigDest -Value $configJson -Encoding UTF8
-
-    if ($configIsNew) {
-        $CreatedFiles.Add($ConfigDest)
-    }
-
-    Log-Info "agent.json written (server_url: $ServerUrl)."
-
-    # -----------------------------------------------------------------------
-    # Step 5: Create Windows service
-    # -----------------------------------------------------------------------
-
-    Log-Info "Step 5/6: Creating Windows service '$ServiceName' ..."
-
-    $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    if ($existingSvc) {
-        if ($Force) {
-            Log-Info "Removing existing service $ServiceName for reinstall..."
-            if ($existingSvc.Status -eq 'Running') {
-                Stop-Service -Name $ServiceName -Force
+        # --- Reinstall: tear down with the verified payload's own helper -----
+        if ($reinstall) {
+            $payloadUninstall = Join-Path $payload 'uninstall.ps1'
+            if (-not (Test-Path -LiteralPath $payloadUninstall)) {
+                throw 'Verified package does not contain uninstall.ps1; cannot reinstall safely.'
             }
-            $wmiSvc = Get-WmiObject -Class Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue
-            if ($wmiSvc) { $wmiSvc.Delete() | Out-Null }
-            # Brief pause so SCM registers the deletion.
-            Start-Sleep -Seconds 2
-        } else {
-            Log-Info "Service $ServiceName already exists.  Updating binary path and config only."
+            Write-Host 'Removing the existing installation (state is preserved)...'
+            & $winPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $payloadUninstall `
+                -InstallDir $installDir -ServiceName $serviceName -LegacyTaskName $legacyTaskName `
+                -UpdateTaskName 'Harmony AIO Dogfood Updates'
+            if ($LASTEXITCODE -ne 0) {
+                throw "Existing-installation teardown failed with exit code $LASTEXITCODE. Nothing new was installed."
+            }
+        }
+
+        # --- Prepare, then finalize, exactly like the setup executable -------
+        Write-Host 'Preparing the native Windows service...'
+        & $winPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $payload 'install.ps1') `
+            -PackageRoot $payload -InstallDir $installDir -ServiceName $serviceName `
+            -LegacyTaskName $legacyTaskName -OpenFirewall -NoStart
+        if ($LASTEXITCODE -ne 0) {
+            throw "Package installer preparation failed with exit code $LASTEXITCODE."
+        }
+
+        Write-Host 'Starting and health-checking the service...'
+        & $winPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $payload 'install.ps1') `
+            -InstallDir $installDir -ServiceName $serviceName -LegacyTaskName $legacyTaskName -FinalizeOnly
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host 'Service finalization failed; rolling back the prepared service...' -ForegroundColor Yellow
+            & $winPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $payload 'install.ps1') `
+                -InstallDir $installDir -ServiceName $serviceName -RollbackPrepared | Out-Null
+            throw 'Harmony service startup or health verification failed. The prepared service was rolled back.'
+        }
+    } finally {
+        Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # --- Report -----------------------------------------------------------------
+    # Best-effort: surface the one-time setup token from the protected server
+    # log. It is reissued on every start until setup completes.
+    $setupToken = $null
+    $serverLog = Join-Path $installDir 'logs\server.log'
+    for ($attempt = 0; $attempt -lt 10 -and -not $setupToken; $attempt++) {
+        Start-Sleep -Seconds 1
+        if (Test-Path -LiteralPath $serverLog) {
+            $match = Select-String -LiteralPath $serverLog -Pattern 'HARMONY INITIAL SETUP TOKEN' -Context 0, 1 |
+                Select-Object -Last 1
+            if ($match -and $match.Context.PostContext.Count -ge 1) {
+                $setupToken = $match.Context.PostContext[0].Trim()
+            }
         }
     }
 
-    if (-not (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) {
-        New-Service `
-            -Name        $ServiceName `
-            -BinaryPathName "`"$BinaryDest`"" `
-            -DisplayName 'Harmony AIO Agent' `
-            -Description 'Harmony AIO monitoring and remediation agent' `
-            -StartupType Automatic | Out-Null
-
-        $ServiceCreated = $true
-        Log-Info "Service '$ServiceName' created."
+    Write-Host ''
+    Write-Host ("=== Harmony AIO Server v{0} installed ===" -f $release.version) -ForegroundColor Green
+    Write-Host ''
+    Write-Host ("  Service:    {0} (automatic, delayed start)" -f $serviceName)
+    Write-Host ("  Dashboard:  http://localhost:{0}" -f $dashboardPort)
+    if ($setupToken) {
+        Write-Host ("  Setup:      http://localhost:{0}/setup" -f $dashboardPort)
+        Write-Host ("  Setup token: {0}" -f $setupToken)
     } else {
-        Log-Info "Service '$ServiceName' already exists; skipping creation."
+        Write-Host '  First-run setup token (printed to the server log on startup):'
+        Write-Host ("    Select-String -Path '{0}' -Pattern 'HARMONY INITIAL SETUP TOKEN' -Context 0,1" -f $serverLog)
     }
-
-    # -----------------------------------------------------------------------
-    # Step 6: Start service and verify
-    # -----------------------------------------------------------------------
-
-    Log-Info "Step 6/6: Starting service '$ServiceName' ..."
-
-    Start-Service -Name $ServiceName
-    $ServiceStarted = $true
-    Log-Info "Start command issued."
-
-    # Poll for up to 30 seconds.
-    Log-Info "Waiting for service to reach Running state (up to 30s) ..."
-    $deadline = (Get-Date).AddSeconds(30)
-    $active   = $false
-
-    while ((Get-Date) -lt $deadline) {
-        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-        if ($svc -and $svc.Status -eq 'Running') {
-            $active = $true
-            break
-        }
-        Start-Sleep -Seconds 2
-    }
-
-    if (-not $active) {
-        throw "Service '$ServiceName' did not reach Running state within 30 seconds."
-    }
-
-    Log-Success "Service '$ServiceName' is Running."
-
-} catch {
-    Log-Error "Installation failed: $_"
-    Invoke-Rollback
-    exit 1
+    Write-Host ''
+    Write-Host '  Windows Firewall was opened for TCP 8420 on Domain and Private profiles.'
+    Write-Host '  Uninstall: irm https://harmonyaio.com/uninstall.ps1 | iex'
+    Write-Host ''
 }
-
-# ---------------------------------------------------------------------------
-# Done
-# ---------------------------------------------------------------------------
-
-Write-Host ''
-Log-Success '=== Installation complete ==='
-Log-Success "  Binary:      $BinaryDest"
-Log-Success "  Config:      $ConfigDest"
-Log-Success "  Service:     $ServiceName (Running, Automatic)"
-Log-Success "  Log file:    $LogPath"
-Write-Host ''
-Log-Info "The agent will phone home to $ServerUrl on its next heartbeat (within 30s)."
-Log-Info "To check status:  Get-Service -Name $ServiceName"
-Log-Info "To view logs:     Get-EventLog -LogName Application -Source $ServiceName -Newest 20"
-Write-Host ''
