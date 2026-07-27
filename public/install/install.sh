@@ -60,6 +60,29 @@ fetch_stdout() {
     fi
 }
 
+# fetch_resolver surfaces the resolver's own error body instead of curl's
+# opaque "(22) ... 404": an empty channel answers with a clear JSON message
+# that the operator should actually see.
+fetch_resolver() {
+    local url="$1" out status body
+    if have curl; then
+        out="$(curl -sSL -w '\n%{http_code}' "$url")" || fail "Could not reach the release resolver at $url"
+        status="${out##*$'\n'}"
+        body="${out%$'\n'*}"
+    elif have wget; then
+        body="$(wget -qO- "$url")" || fail "Release resolver request failed at $url (channel may have no published releases yet)."
+        status="200"
+    else
+        fail "curl or wget is required."
+    fi
+    if [ "$status" != "200" ]; then
+        local errmsg
+        errmsg="$(json_str "$body" error)"
+        fail "${errmsg:-Release resolver returned HTTP $status at $url}"
+    fi
+    printf '%s' "$body"
+}
+
 # fetch_file url dest max_bytes
 # The transfer is capped BEFORE the hash check so a hostile origin cannot
 # fill the disk; an over-cap transfer is caught here or by the exact size
@@ -176,7 +199,7 @@ main() {
         fi
         log "Resolving latest release..."
         local response
-        response="$(fetch_stdout "$resolver")" || fail "Could not reach the release resolver at $resolver"
+        response="$(fetch_resolver "$resolver")"
         version="$(json_str "$response" version)"
         url="$(json_str "$response" url)"
         sha256="$(json_str "$response" sha256)"
@@ -297,6 +320,9 @@ ROOTEOF
     elif have firewall-cmd && $SUDO firewall-cmd --state >/dev/null 2>&1; then
         fw_kind="firewalld"
     fi
+    if [ -z "$fw_kind" ]; then
+        log "No active firewall detected (ufw/firewalld); firewall unchanged."
+    fi
     if [ -n "$fw_kind" ] && [ "${HARMONY_OPEN_FIREWALL:-}" != "0" ]; then
         local open_fw="${HARMONY_OPEN_FIREWALL:-}"
         if [ -z "$open_fw" ]; then
@@ -359,6 +385,27 @@ ROOTEOF
     local host_ip=""
     host_ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || host_ip=""
 
+    # Never advertise a URL nothing is listening on: the TLS bootstrap only
+    # takes effect on server builds that honor it, so probe the HTTPS port
+    # (pure-bash /dev/tcp, no curl dependency) and report reality.
+    local tls_note=""
+    if [ "$enable_tls" = "1" ]; then
+        local probe_tries=0 tls_live=false
+        while [ $probe_tries -lt 10 ]; do
+            if (exec 3<>"/dev/tcp/127.0.0.1/$TLS_PORT") 2>/dev/null; then
+                exec 3>&- 3<&- 2>/dev/null || true
+                tls_live=true
+                break
+            fi
+            probe_tries=$((probe_tries + 1))
+            sleep 1
+        done
+        if [ "$tls_live" = false ]; then
+            enable_tls="0"
+            tls_note="HTTPS bootstrap was requested, but this server build does not serve it yet; it takes effect automatically after the next server update."
+        fi
+    fi
+
     local dash_url="http://${host_ip:-localhost}:$DASHBOARD_PORT"
     if [ "$enable_tls" = "1" ]; then
         dash_url="https://${host_ip:-localhost}:$TLS_PORT"
@@ -380,6 +427,9 @@ ROOTEOF
         log "  HTTPS uses a self-signed certificate, so your browser will warn on"
         log "  first visit - that's expected. Install a real certificate later in"
         log "  Settings > Security > TLS. Plain http on $DASHBOARD_PORT redirects here."
+    elif [ -n "$tls_note" ]; then
+        log ""
+        log "  NOTE: $tls_note"
     elif [ "$fresh_install" = false ]; then
         log ""
         log "  Reinstall: the server keeps its previously configured TLS posture;"
