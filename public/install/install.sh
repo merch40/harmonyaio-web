@@ -50,6 +50,24 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# have_tty reports whether this process can actually talk to a controlling
+# terminal.
+#
+# Do NOT use `[ -r /dev/tty ] && [ -w /dev/tty ]`: test only performs an
+# access() check against the device node, which succeeds on permissions alone
+# even when the process has no controlling terminal. Opening it is what fails
+# (ENXIO). Under `curl ... | bash` from cloud-init, CI, or a remote exec there is
+# no controlling terminal, so the naive guard reports a TTY, the interactive
+# branch runs, and the first write to /dev/tty kills the script under set -e -
+# leaving the unit installed and enabled but never started.
+#
+# `[ -t 0 ]` is also wrong here: under `curl | bash` stdin is the pipe even in
+# a fully interactive session, so it would suppress prompts that genuinely can
+# be shown. Opening /dev/tty is the only test that distinguishes the two.
+have_tty() {
+    { : >/dev/tty; } 2>/dev/null && { : </dev/tty; } 2>/dev/null
+}
+
 fetch_stdout() {
     if have curl; then
         curl -fsSL "$1"
@@ -151,7 +169,7 @@ main() {
         have sudo || fail "Run as root, or install sudo: curl -fsSL https://harmonyaio.com/install.sh | sudo bash"
         SUDO="sudo"
         if ! sudo -n true 2>/dev/null; then
-            if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+            if have_tty; then
                 log "Root privileges are required; sudo will now ask for your password."
                 sudo -v < /dev/tty || fail "sudo authentication failed."
             else
@@ -166,7 +184,7 @@ main() {
         fresh_install=false
         if [ "${HARMONY_REINSTALL:-}" = "1" ]; then
             log "Existing installation detected; HARMONY_REINSTALL=1 set, continuing with in-place reinstall."
-        elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        elif have_tty; then
             printf 'An existing Harmony server installation was detected.\nReinstall/upgrade in place? Data, config, and logs are preserved. [y/N] ' > /dev/tty
             local answer=""
             read -r answer < /dev/tty || answer=""
@@ -326,7 +344,7 @@ ROOTEOF
     if [ -n "$fw_kind" ] && [ "${HARMONY_OPEN_FIREWALL:-}" != "0" ]; then
         local open_fw="${HARMONY_OPEN_FIREWALL:-}"
         if [ -z "$open_fw" ]; then
-            if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+            if have_tty; then
                 printf 'Firewall %s is active. Open TCP %s for the Harmony dashboard? [Y/n] ' "$fw_kind" "$fw_ports" > /dev/tty
                 local fw_answer=""
                 read -r fw_answer < /dev/tty || fw_answer=""
