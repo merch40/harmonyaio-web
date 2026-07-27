@@ -12,11 +12,13 @@
     // builds artifact URLs against. Front Door custom domain in front of
     // the paazharupdatescf9d 'updates' container (ADR 0028).
     "UPDATE_ORIGIN": "https://updates.harmonyaio.com",
-    // Channel preference order for install one-liners that do not ask for a
-    // specific channel. Stable wins the moment its first release is
-    // published; until then requests fall through to dogfood. Only a
-    // missing channel pointer falls through, never a verification failure.
-    "DEFAULT_CHANNEL": "stable,dogfood",
+    // Channel for install one-liners that do not ask for one. Deliberately
+    // just "stable" (which has no releases yet): the plain public one-liner
+    // stays inert until the first stable release is published, and dogfood
+    // installs must opt in explicitly with HARMONY_CHANNEL=dogfood. The
+    // value accepts a comma-separated preference list if fallback is ever
+    // wanted again.
+    "DEFAULT_CHANNEL": "stable",
     "ALLOWED_CHANNELS": "dogfood,stable"
   }
 }
