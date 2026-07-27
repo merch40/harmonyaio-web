@@ -12,6 +12,7 @@ import {
   verifyChannelEnvelope,
   selectArtifact,
   resolveLatest,
+  channelCandidates,
   ResolverError,
 } from "../src/release_resolver.js";
 import { PINNED_UPDATE_KEYS } from "../src/update_trust.js";
@@ -196,6 +197,44 @@ describe("verifyChannelEnvelope", () => {
     for (const [manifest, pattern] of cases) {
       const envelope = await signedEnvelope(manifest);
       await expect(verifyChannelEnvelope(envelope, pinnedKeys, NOW)).rejects.toThrow(pattern);
+    }
+  });
+});
+
+describe("channelCandidates", () => {
+  it("explicit channel is exact and never falls back", () => {
+    expect(channelCandidates("dogfood", "stable,dogfood", "dogfood,stable")).toEqual(["dogfood"]);
+    expect(channelCandidates("stable", "stable,dogfood", "dogfood,stable")).toEqual(["stable"]);
+  });
+
+  it("rejects unknown or malformed explicit channels with 400", () => {
+    for (const bad of ["evil", "../etc", "sta ble", ""]) {
+      try {
+        // Empty string means "no explicit channel", so skip it here.
+        if (bad === "") continue;
+        channelCandidates(bad, "stable,dogfood", "dogfood,stable");
+        expect.unreachable();
+      } catch (err) {
+        expect(err).toBeInstanceOf(ResolverError);
+        expect(err.status).toBe(400);
+      }
+    }
+  });
+
+  it("default request walks the preference list in order", () => {
+    expect(channelCandidates(null, "stable,dogfood", "dogfood,stable")).toEqual(["stable", "dogfood"]);
+  });
+
+  it("default list entries outside the allowlist are dropped", () => {
+    expect(channelCandidates(null, "stable,rc,dogfood", "dogfood,stable")).toEqual(["stable", "dogfood"]);
+  });
+
+  it("throws 400 when no default candidate survives the allowlist", () => {
+    try {
+      channelCandidates(null, "rc", "dogfood,stable");
+      expect.unreachable();
+    } catch (err) {
+      expect(err.status).toBe(400);
     }
   });
 });

@@ -17,7 +17,7 @@
 // OS. The one-liners never parse or trust the raw channel envelope.
 
 import { PINNED_UPDATE_KEYS } from "./update_trust.js";
-import { importPinnedKeys, resolveLatest, ResolverError, MAX_ENVELOPE_BYTES } from "./release_resolver.js";
+import { importPinnedKeys, resolveLatest, channelCandidates, ResolverError, MAX_ENVELOPE_BYTES } from "./release_resolver.js";
 
 const INSTALL_SCRIPTS = {
   "/install.sh": { asset: "/install/install.sh", eol: "lf" },
@@ -71,45 +71,52 @@ async function handleReleaseResolve(url, env) {
     return jsonResponse({ error: "os must be 'linux' or 'windows'" }, 400);
   }
 
-  const allowed = (env.ALLOWED_CHANNELS || "dogfood,stable").split(",").map((c) => c.trim()).filter(Boolean);
-  const channel = url.searchParams.get("channel") || env.DEFAULT_CHANNEL || "dogfood";
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(channel) || !allowed.includes(channel)) {
-    return jsonResponse({ error: "unknown channel", allowed_channels: allowed }, 400);
-  }
-
+  const allowed = env.ALLOWED_CHANNELS || "dogfood,stable";
   const updateOrigin = (env.UPDATE_ORIGIN || "https://updates.harmonyaio.com").replace(/\/+$/, "");
 
   try {
-    const upstream = await fetch(`${updateOrigin}/v1/channels/${channel}.json`, {
-      cf: { cacheTtl: 0, cacheEverything: false },
-      headers: { "cache-control": "no-cache" },
-    });
-    if (upstream.status === 404) {
-      return jsonResponse({ error: `channel '${channel}' has no published releases yet` }, 404);
-    }
-    if (!upstream.ok) {
-      console.error("release resolver: upstream status", upstream.status, "for channel", channel);
-      return jsonResponse({ error: "update origin is unavailable" }, 502);
-    }
-    const envelopeText = await readBodyCapped(upstream, MAX_ENVELOPE_BYTES);
-    if (envelopeText === null) {
-      return jsonResponse({ error: "channel envelope is too large" }, 502);
-    }
+    // Explicit ?channel= is exact. The default is a preference list
+    // ("stable,dogfood"): once a stable release exists it wins automatically;
+    // until then the plain one-liner falls through to dogfood. Only a
+    // MISSING channel pointer (404) falls through - any verification
+    // failure on a preferred channel fails loud, never silently downgrades.
+    const candidates = channelCandidates(url.searchParams.get("channel"), env.DEFAULT_CHANNEL || "stable,dogfood", allowed);
 
-    const result = await resolveLatest({
-      envelopeText,
-      os,
-      pinnedKeys: await getPinnedKeys(),
-      updateOrigin,
-      expectedChannel: channel,
-      nowMs: Date.now(),
-    });
+    for (let i = 0; i < candidates.length; i++) {
+      const channel = candidates[i];
+      const upstream = await fetch(`${updateOrigin}/v1/channels/${channel}.json`, {
+        cf: { cacheTtl: 0, cacheEverything: false },
+        headers: { "cache-control": "no-cache" },
+      });
+      if (upstream.status === 404) {
+        if (i < candidates.length - 1) continue;
+        return jsonResponse({ error: `channel '${channel}' has no published releases yet` }, 404);
+      }
+      if (!upstream.ok) {
+        console.error("release resolver: upstream status", upstream.status, "for channel", channel);
+        return jsonResponse({ error: "update origin is unavailable" }, 502);
+      }
+      const envelopeText = await readBodyCapped(upstream, MAX_ENVELOPE_BYTES);
+      if (envelopeText === null) {
+        return jsonResponse({ error: "channel envelope is too large" }, 502);
+      }
 
-    return jsonResponse(result, 200, {
-      // Channel pointers are mutable; never let a stale answer linger.
-      "cache-control": "no-store",
-      "access-control-allow-origin": "*",
-    });
+      const result = await resolveLatest({
+        envelopeText,
+        os,
+        pinnedKeys: await getPinnedKeys(),
+        updateOrigin,
+        expectedChannel: channel,
+        nowMs: Date.now(),
+      });
+
+      return jsonResponse(result, 200, {
+        // Channel pointers are mutable; never let a stale answer linger.
+        "cache-control": "no-store",
+        "access-control-allow-origin": "*",
+      });
+    }
+    return jsonResponse({ error: "no default channel has published releases yet" }, 404);
   } catch (err) {
     if (err instanceof ResolverError) {
       console.error("release resolver:", err.message);

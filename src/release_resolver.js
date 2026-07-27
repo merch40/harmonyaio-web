@@ -217,6 +217,29 @@ export async function verifyChannelEnvelope(envelopeText, pinnedKeys, nowMs, sub
   throw new ResolverError(502, "no signature matched a pinned PS256 public key");
 }
 
+// channelCandidates decides which channels a request may resolve from.
+// An explicit ?channel= is exact: it never falls back (returning a
+// different channel than requested would defeat channel binding). With no
+// explicit channel, the default preference list is tried in order; only a
+// channel whose pointer does not exist (404) falls through to the next.
+// Returns the validated candidate list, or throws 400 for unknown names.
+export function channelCandidates(explicitChannel, defaultChannels, allowedChannels) {
+  const allowed = (allowedChannels || "")
+    .split(",").map((c) => c.trim()).filter(Boolean);
+  if (explicitChannel) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(explicitChannel) || !allowed.includes(explicitChannel)) {
+      throw new ResolverError(400, "unknown channel");
+    }
+    return [explicitChannel];
+  }
+  const candidates = (defaultChannels || "")
+    .split(",").map((c) => c.trim()).filter((c) => allowed.includes(c));
+  if (candidates.length === 0) {
+    throw new ResolverError(400, "no default channel is configured");
+  }
+  return candidates;
+}
+
 // selectArtifact picks the server artifact for a target OS.
 export function selectArtifact(manifest, os) {
   const format = os === "windows" ? "zip" : "tar.gz";
