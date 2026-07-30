@@ -23,6 +23,9 @@
 #                         open the dashboard port in ufw/firewalld without
 #                         asking (1) or never touch the firewall (0); unset
 #                         prompts when a terminal is available
+#   HARMONY_NO_LOCAL_AGENT=1
+#                         skip provisioning the local Harmony agent on this
+#                         host after the server starts
 #   HARMONY_DRYRUN=1      resolve, download, verify, and extract only; install
 #                         nothing and touch no system state
 #   HARMONY_RESOLVER_URL  alternate resolver endpoint (testing)
@@ -400,6 +403,32 @@ ROOTEOF
     token="$($SUDO journalctl -u "$SERVICE_NAME" -n 300 --no-pager -o cat 2>/dev/null | \
         awk '/HARMONY INITIAL SETUP TOKEN/{getline; gsub(/^[ \t]+|[ \t]+$/, ""); print; exit}')" || token=""
 
+    # --- Local agent ---------------------------------------------------------
+    # The package ships bin/provision-local-agent.sh: it installs a Harmony
+    # agent on this host so the new server can monitor its own machine and map
+    # the network. The agent stays idle until the operator approves it on the
+    # /setup page (checkbox, on by default).
+    local local_agent="not installed"
+    if [ "${HARMONY_NO_LOCAL_AGENT:-}" = "1" ]; then
+        log "HARMONY_NO_LOCAL_AGENT=1 set: skipping local agent provisioning."
+        local_agent="skipped (HARMONY_NO_LOCAL_AGENT=1)"
+    # Test with the SAME privilege that runs the script. /var/lib/harmony is
+    # 0750 root:harmony, so an unprivileged `[ -f ... ]` here cannot even
+    # traverse into it: the test came back false on every ordinary
+    # `curl | bash` install and the whole feature silently never ran, while the
+    # file was sitting right there. A guard must not check as a different user
+    # than the command it guards.
+    elif $SUDO test -f /var/lib/harmony/bin/provision-local-agent.sh; then
+        log "Provisioning the local Harmony agent for this host..."
+        if $SUDO bash /var/lib/harmony/bin/provision-local-agent.sh; then
+            local_agent="installed (approve it during setup)"
+        else
+            log "WARNING: local agent provisioning failed; the server install is unaffected."
+            log "         Re-run later with: sudo bash /var/lib/harmony/bin/provision-local-agent.sh"
+            local_agent="failed (see warning above)"
+        fi
+    fi
+
     local host_ip=""
     host_ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || host_ip=""
 
@@ -433,6 +462,7 @@ ROOTEOF
     log "=== Harmony AIO Server v$version installed ==="
     log ""
     log "  Dashboard:  $dash_url"
+    log "  Local agent: $local_agent"
     if [ -n "$token" ]; then
         log "  Setup:      $dash_url/setup"
         log "  Setup token: $token"

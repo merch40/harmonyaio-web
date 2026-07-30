@@ -17,6 +17,9 @@
 #                         bypass the resolver with an explicit artifact (testing)
 #   HARMONY_DRYRUN=1      resolve, download, verify, and extract only; install
 #                         nothing and touch no system state
+#   HARMONY_NO_LOCAL_AGENT=1
+#                         skip provisioning the local Harmony agent on this
+#                         host after the server starts
 #
 # Run from an elevated PowerShell session (5.1 or 7+). The inner package
 # installer always executes under 64-bit Windows PowerShell 5.1, matching the
@@ -193,6 +196,28 @@
         Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
+    # --- Local agent --------------------------------------------------------
+    # The installed package ships bin\provision-local-agent.ps1: it installs a
+    # Harmony agent on this host so the new server can monitor its own machine
+    # and map the network. The agent stays idle until the operator approves it
+    # on the /setup page (checkbox, on by default).
+    $localAgentNote = 'not installed'
+    $provisionScript = Join-Path $installDir 'bin\provision-local-agent.ps1'
+    if ($env:HARMONY_NO_LOCAL_AGENT -eq '1') {
+        Write-Host 'HARMONY_NO_LOCAL_AGENT=1 set: skipping local agent provisioning.'
+        $localAgentNote = 'skipped (HARMONY_NO_LOCAL_AGENT=1)'
+    } elseif (Test-Path -LiteralPath $provisionScript) {
+        Write-Host 'Provisioning the local Harmony agent for this host...'
+        & $winPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $provisionScript -ServerRoot $installDir
+        if ($LASTEXITCODE -eq 0) {
+            $localAgentNote = 'installed (approve it during setup)'
+        } else {
+            Write-Host 'WARNING: local agent provisioning failed; the server install is unaffected.' -ForegroundColor Yellow
+            Write-Host ("         Re-run later, elevated: powershell -ExecutionPolicy Bypass -File `"{0}`"" -f $provisionScript)
+            $localAgentNote = 'failed (see warning above)'
+        }
+    }
+
     # --- Report -----------------------------------------------------------------
     # Best-effort: surface the one-time setup token from the protected server
     # log. It is reissued on every start until setup completes.
@@ -214,6 +239,7 @@
     Write-Host ''
     Write-Host ("  Service:    {0} (automatic, delayed start)" -f $serviceName)
     Write-Host ("  Dashboard:  http://localhost:{0}" -f $dashboardPort)
+    Write-Host ("  Local agent: {0}" -f $localAgentNote)
     if ($setupToken) {
         Write-Host ("  Setup:      http://localhost:{0}/setup" -f $dashboardPort)
         Write-Host ("  Setup token: {0}" -f $setupToken)

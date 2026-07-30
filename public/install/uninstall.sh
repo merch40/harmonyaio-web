@@ -43,6 +43,30 @@ main() {
         fi
     fi
 
+    # Remove the signed-update controller first so nothing restarts the
+    # service mid-uninstall. Order matters: stop new activations (timer +
+    # path), wait for a running updater to finish (stopping a oneshot blocks
+    # until it exits), and only THEN decide whether an interrupted
+    # activation blocks the uninstall.
+    $SUDO systemctl disable --now harmony-updater.timer 2>/dev/null || true
+    $SUDO systemctl disable --now harmony-updater.path 2>/dev/null || true
+    $SUDO systemctl stop harmony-updater.service 2>/dev/null || true
+    if $SUDO test -f "$DATA_DIR/updates/activation.json" 2>/dev/null; then
+        $SUDO systemctl enable --now harmony-updater.timer 2>/dev/null || true
+        $SUDO systemctl enable --now harmony-updater.path 2>/dev/null || true
+        fail "Interrupted update recovery is pending; resolve it before uninstalling: $DATA_DIR/updates/activation.json (run: sudo /usr/local/bin/harmony-update run)"
+    fi
+    if [ -f "$SYSTEMD_DIR/harmony-updater.service" ] || [ -f "$SYSTEMD_DIR/harmony-updater.timer" ] || [ -f "$SYSTEMD_DIR/harmony-updater.path" ]; then
+        log "Removing update controller units..."
+        $SUDO rm -f "$SYSTEMD_DIR/harmony-updater.service" "$SYSTEMD_DIR/harmony-updater.timer" "$SYSTEMD_DIR/harmony-updater.path"
+        $SUDO systemctl daemon-reload
+        $SUDO systemctl reset-failed harmony-updater.service 2>/dev/null || true
+    fi
+    if [ -f "$INSTALL_DIR/harmony-update" ]; then
+        log "Removing updater binary..."
+        $SUDO rm -f "$INSTALL_DIR/harmony-update"
+    fi
+
     if systemctl is-active --quiet "$BINARY_NAME" 2>/dev/null; then
         log "Stopping $BINARY_NAME..."
         $SUDO systemctl stop "$BINARY_NAME"
@@ -65,6 +89,16 @@ main() {
 
     if [ "$purge" = true ]; then
         log ""
+        # A local agent provisioned by the server package is removed on purge;
+        # an independently installed agent (no marker file) is left alone.
+        if [ -f "$CONFIG_DIR/local-agent.provisioned" ]; then
+            log "Removing the provisioned local agent..."
+            $SUDO systemctl stop harmony-agent 2>/dev/null || true
+            $SUDO systemctl disable harmony-agent 2>/dev/null || true
+            $SUDO rm -f "$SYSTEMD_DIR/harmony-agent.service" /opt/harmony/harmony-agent "$CONFIG_DIR/agent.json" "$CONFIG_DIR/local-agent.provisioned"
+            $SUDO rmdir /opt/harmony 2>/dev/null || true
+            $SUDO systemctl daemon-reload
+        fi
         log "Purging all data, config, and logs..."
         $SUDO rm -rf "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
         if id -u "$SERVICE_USER" >/dev/null 2>&1; then
