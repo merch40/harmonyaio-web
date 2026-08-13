@@ -7,6 +7,14 @@
     "binding": "ASSETS",
     "not_found_handling": "404-page"
   },
+  // REQUIRED OUT-OF-BAND CONFIG — the newsletter signup (/api/signup) needs
+  // two values that must be set as SECRETS, never as dashboard plaintext vars:
+  //   npx wrangler secret put BREVO_API_KEY   # Brevo -> Settings -> API keys
+  //   npx wrangler secret put BREVO_LIST_ID   # numeric list id from Brevo -> Contacts -> Lists
+  // Secrets survive `wrangler deploy`; dashboard plaintext vars DO NOT — any
+  // deploy replaces the whole vars set with this file's "vars" block, which is
+  // how the signup broke in July 2026. If either value is missing the endpoint
+  // returns {"error":"Server not configured"}.
   "vars": {
     // Base URL the release resolver fetches channel pointers from and
     // builds artifact URLs against. Front Door custom domain in front of
