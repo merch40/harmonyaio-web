@@ -146,12 +146,15 @@ expiry.  Both are idempotent.
 
 ---
 
-## Magic-link auth (Brevo deferred)
+## Magic-link auth (email sending deferred)
 
 The magic-link request endpoint logs the verify URL to `console.log`
-instead of emailing it.  Hooking up Brevo is deferred per §17 of the
-sprint brief; when ready, replace the `console.log` line in
-`src/magic_link.ts::handleAuthRequest` with a Brevo API call.
+instead of emailing it.  Email sending is deferred per §17 of the
+sprint brief.  Plan of record (2026-08-14): **Azure Communication
+Services Email** in the PA tenant, not Brevo — see the repo-root
+`ROADMAP.md` (PA transition, Phase 3).  When ready, replace the
+`console.log` line in `src/magic_link.ts::handleAuthRequest` with an
+ACS send.
 
 Sessions are JWT-shaped (header.body.HMAC-SHA256), 24-hour TTL,
 HttpOnly + Secure + SameSite=Lax.
