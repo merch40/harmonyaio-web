@@ -11,10 +11,22 @@
   // two values that must be set as SECRETS, never as dashboard plaintext vars:
   //   npx wrangler secret put BREVO_API_KEY   # Brevo -> Settings -> API keys
   //   npx wrangler secret put BREVO_LIST_ID   # numeric list id from Brevo -> Contacts -> Lists
+  // Optional:
+  //   npx wrangler secret put BREVO_WELCOME_TEMPLATE_ID  # transactional template id;
+  //     when set, new signups get a welcome email from the template's sender
+  //     (requires harmonyaio.com authenticated as a Brevo sending domain).
   // Secrets survive `wrangler deploy`; dashboard plaintext vars DO NOT — any
   // deploy replaces the whole vars set with this file's "vars" block, which is
   // how the signup broke in July 2026. If either value is missing the endpoint
   // returns {"error":"Server not configured"}.
+  //
+  // GET /api/signup/health probes the same config end to end (env present +
+  // Brevo accepts the key); the weekly cron below runs the probe too, which
+  // doubles as keep-alive activity so Brevo's inactivity auto-deactivation
+  // can't silently kill the key again.
+  "triggers": {
+    "crons": ["0 14 * * MON"]
+  },
   "vars": {
     // Base URL the release resolver fetches channel pointers from and
     // builds artifact URLs against. Front Door custom domain in front of

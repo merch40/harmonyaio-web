@@ -25,7 +25,14 @@ page shouldn't wait on a CRM project.
 - [ ] Re-add `BREVO_API_KEY` / `BREVO_LIST_ID` as **wrangler secrets** (see
       `wrangler.jsonc` header comment for the commands and the July 2026
       vars-wipe incident that killed them). *(Beau)*
-- [ ] Verify: `POST /api/signup` returns `{"success":true}`.
+- [x] Verify: `POST /api/signup` returns `{"success":true}`. *(done 2026-08-14)*
+- [ ] `wrangler deploy` the signup health probe (`GET /api/signup/health` + weekly
+      cron). The cron doubles as Brevo key keep-alive; a weekly scheduled check
+      against the endpoint notifies on failure so the form can't die silently again.
+- [ ] Optional welcome email: authenticate harmonyaio.com as a Brevo sending
+      domain (DKIM/SPF records in Cloudflare DNS), create a transactional
+      template with sender noreply@harmonyaio.com, then
+      `npx wrangler secret put BREVO_WELCOME_TEMPLATE_ID`.
 
 ### Phase 1 — account ownership (near term, independent of any code)
 
