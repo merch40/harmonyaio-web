@@ -19,6 +19,7 @@
 import { PINNED_UPDATE_KEYS } from "./update_trust.js";
 import { importPinnedKeys, resolveLatest, channelCandidates, ResolverError, MAX_ENVELOPE_BYTES } from "./release_resolver.js";
 import { probeSignup } from "./signup_health.js";
+import { handleChat } from "./chat.js";
 
 const INSTALL_SCRIPTS = {
   "/install.sh": { asset: "/install/install.sh", eol: "lf" },
@@ -52,6 +53,13 @@ export default {
         return jsonResponse({ error: "Method not allowed" }, 405);
       }
       return handleSignupHealth(env);
+    }
+
+    if (url.pathname === "/api/chat") {
+      if (request.method !== "POST") {
+        return jsonResponse({ error: "Method not allowed" }, 405);
+      }
+      return handleChat(request, env);
     }
 
     if (url.pathname === "/api/releases/latest") {
@@ -277,15 +285,12 @@ async function handleSignup(request, env, ctx) {
 
     // Brevo returns 201 for new contact, 204 for updated existing contact
     if (brevoResponse.status === 201 || brevoResponse.status === 204) {
-      // Optional welcome/confirmation email, only for genuinely new
-      // contacts (201) so re-submitting an address never re-emails it.
-      // Inert until BREVO_WELCOME_TEMPLATE_ID is set (a Brevo
-      // transactional template; its configured sender needs the
-      // harmonyaio.com domain authenticated in Brevo). Fire-and-forget:
-      // a failed email must never fail the signup.
-      if (brevoResponse.status === 201 && env.BREVO_WELCOME_TEMPLATE_ID) {
-        ctx.waitUntil(sendWelcomeEmail(email, env));
-      }
+      // The welcome email is NOT sent from here. It is a Brevo automation
+      // ("Welcome message") triggered by the contact landing on the early
+      // access list, which is why this handler only has to add the contact.
+      // A transactional send used to be planned here via
+      // BREVO_WELCOME_TEMPLATE_ID; that path was removed on 2026-08-14
+      // because running both would email every new signup twice.
       return jsonResponse({ success: true });
     }
 
@@ -297,31 +302,6 @@ async function handleSignup(request, env, ctx) {
   } catch (err) {
     console.error("Signup handler exception:", err);
     return jsonResponse({ error: "Unexpected error" }, 500);
-  }
-}
-
-// sendWelcomeEmail sends the Brevo transactional template to a newly
-// created contact. Sender identity (e.g. noreply@harmonyaio.com) comes
-// from the template itself. Errors are logged, never surfaced.
-async function sendWelcomeEmail(email, env) {
-  try {
-    const response = await fetch("https://api.brevo.com/v3/smtp/email", {
-      method: "POST",
-      headers: {
-        "accept": "application/json",
-        "content-type": "application/json",
-        "api-key": env.BREVO_API_KEY,
-      },
-      body: JSON.stringify({
-        to: [{ email }],
-        templateId: parseInt(env.BREVO_WELCOME_TEMPLATE_ID, 10),
-      }),
-    });
-    if (!response.ok) {
-      console.error("welcome email failed:", response.status, await response.text());
-    }
-  } catch (err) {
-    console.error("welcome email exception:", err);
   }
 }
 

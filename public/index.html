@@ -67,6 +67,7 @@
       font-family: 'Cinzel', serif; font-weight: 900; font-size: 26px; color: #080808;
       margin-bottom: 14px;
       cursor: pointer;
+      text-decoration: none;
       box-shadow: 0 0 40px rgba(232,160,32,0.4), 0 0 80px rgba(45,212,191,0.2), 0 4px 24px rgba(0,0,0,0.6);
     }
     .wordmark-name {
@@ -165,6 +166,11 @@
     }
     .footer-copy { font-size: 12px; color: rgba(240,237,232,0.25); letter-spacing: 0.05em; }
     .footer-copy a { color: var(--teal); text-decoration: none; }
+    .footer-legal {
+      margin-top: 8px;
+      font-size: 10.5px; letter-spacing: 0.04em;
+      color: rgba(240,237,232,0.16);
+    }
 
     /* ANIMATIONS */
     @keyframes fadeDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
@@ -215,7 +221,7 @@
     }
 
 
-    /* ── EASTER EGG: faster H pulse on hover ── */
+    /* Faster H pulse on hover: the affordance that says this is a link. */
     @keyframes hPulseFast {
       0%, 100% {
         box-shadow: 0 0 55px rgba(232,160,32,0.65), 0 0 100px rgba(45,212,191,0.35), 0 4px 32px rgba(0,0,0,0.6);
@@ -231,119 +237,16 @@
       box-shadow: 0 0 70px rgba(45,212,191,0.9), 0 0 120px rgba(232,160,32,0.5);
     }
 
-    /* ── MANIFESTO OVERLAY ── */
-    .harmony-overlay {
-      position: fixed; inset: 0; z-index: 200;
-      background: rgba(6,6,8,0.92);
-      -webkit-backdrop-filter: blur(14px);
-      backdrop-filter: blur(14px);
-      display: flex; align-items: center; justify-content: center;
-      opacity: 0; pointer-events: none;
-      transition: opacity 0.5s ease;
-    }
-    .harmony-overlay.open { opacity: 1; pointer-events: auto; }
+    /* The manifesto overlay, bloom transition and typed console lines that
+       used to gate this page were removed on 2026-08-14. The architecture
+       page is linked directly from the H now: there is real content on the
+       site worth reading, so hiding it behind a puzzle stopped making sense.
+       The breathing H and its hover swell were kept. */
 
-    .harmony-card {
-      text-align: center; padding: 60px 40px;
-      cursor: pointer; max-width: 90vw;
-      transform: translateY(20px);
-      transition: transform 0.6s ease, opacity 0.4s ease;
-    }
-    .harmony-overlay.open .harmony-card { transform: translateY(0); }
-    .harmony-overlay.typing .harmony-card,
-    .harmony-overlay.bloom .harmony-card { opacity: 0; pointer-events: none; }
-
-    .harmony-line {
-      font-family: 'Cormorant Garamond', serif;
-      font-style: italic; font-weight: 300;
-      font-size: clamp(40px, 7vw, 84px);
-      color: var(--white); line-height: 1.15;
-      letter-spacing: 0.005em;
-      animation: lineGlow 2.8s ease-in-out infinite;
-      user-select: none;
-    }
-    @keyframes lineGlow {
-      0%, 100% { text-shadow: 0 0 40px rgba(232,160,32,0.45), 0 4px 30px rgba(0,0,0,0.9); }
-      50%      { text-shadow: 0 0 70px rgba(232,160,32,0.8), 0 0 120px rgba(45,212,191,0.4), 0 4px 30px rgba(0,0,0,0.9); }
-    }
-
-    /* ── BLOOM STAGE ── */
-    .bloom-stage {
-      position: absolute; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      pointer-events: none;
-    }
-
-    .bloom-orb {
-      position: absolute; left: 50%; top: 50%;
-      width: 60px; height: 60px;
-      margin-left: -30px; margin-top: -30px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(232,160,32,1) 0%, rgba(232,160,32,0.55) 35%, rgba(45,212,191,0.2) 70%, transparent 100%);
-      box-shadow: 0 0 80px rgba(232,160,32,0.9), 0 0 160px rgba(45,212,191,0.55);
-      opacity: 0;
-      transform: scale(0.15);
-    }
-    .harmony-overlay.bloom .bloom-orb {
-      animation: orbBloom 1.7s ease-out forwards;
-    }
-    @keyframes orbBloom {
-      0%   { transform: scale(0.15); opacity: 0; }
-      15%  { transform: scale(1);    opacity: 1; }
-      55%  { opacity: 0.9; }
-      100% { transform: scale(9);    opacity: 0; }
-    }
-
-    .bloom-trace {
-      position: absolute;
-      left: calc(50% - 1px); top: 50%;
-      width: 2px; height: 0;
-      background: linear-gradient(to bottom, var(--teal) 0%, rgba(45,212,191,0.6) 40%, transparent 100%);
-      transform-origin: top center;
-      opacity: 0;
-    }
-    .harmony-overlay.bloom .bloom-trace {
-      animation: traceShoot 1.4s ease-out 0.18s forwards;
-    }
-    @keyframes traceShoot {
-      0%   { height: 0;       opacity: 0; }
-      15%  { opacity: 0.95; }
-      100% { height: 65vmax;  opacity: 0; }
-    }
-
-    .bloom-console {
-      position: absolute;
-      left: 50%; top: 50%;
-      transform: translate(-50%, -50%);
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 14px; color: var(--teal); text-align: left;
-      letter-spacing: 0.06em;
-      text-shadow: 0 0 12px rgba(45,212,191,0.7);
-      width: max-content; max-width: 90vw;
-      line-height: 1.85;
-    }
-    .bloom-console p { opacity: 0; min-height: 1.4em; }
-    .harmony-overlay.typing .bloom-console p,
-    .harmony-overlay.bloom .bloom-console p { opacity: 1; }
-    /* Blinking block cursor while a line is being typed */
-    .bloom-console p.typing-now::after {
-      content: '';
-      display: inline-block;
-      width: 8px; height: 14px;
-      background: var(--teal);
-      margin-left: 4px;
-      vertical-align: text-bottom;
-      box-shadow: 0 0 8px rgba(45,212,191,0.7);
-      animation: cursorBlink 0.6s steps(1) infinite;
-    }
-    @keyframes cursorBlink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
 
     /* Reduced motion: keep the layout, kill the heavy animations */
     @media (prefers-reduced-motion: reduce) {
-      .wordmark-h, .wordmark-h:hover, .harmony-line { animation: none; }
-      .harmony-overlay.bloom .bloom-orb,
-      .harmony-overlay.bloom .bloom-trace,
-      .harmony-overlay.bloom .bloom-console p { animation-duration: 0.01s; }
+      .wordmark-h, .wordmark-h:hover { animation: none; }
     }
 
   </style>
@@ -360,7 +263,7 @@
 
   <div class="wordmark">
     <div class="wordmark-h-wrap">
-      <div class="wordmark-h" id="harmonyEgg" role="button" tabindex="0" aria-label="Harmony">H</div>
+      <a class="wordmark-h" href="/architecture.html" aria-label="Harmony AIO architecture">H</a>
     </div>
     <span class="wordmark-name">HARMONY AIO</span>
     <span class="wordmark-sub">AI Operations Orchestration</span>
@@ -409,31 +312,17 @@
   <p class="footer-copy">
     &copy; 2026 Harmony AIO
   </p>
+  <!-- Attribution required by the Llama 3.3 Community License section 1.b.i
+       while the site assistant runs on Workers AI's Llama model. If
+       ANTHROPIC_API_KEY is ever set on the worker the assistant switches to
+       Claude, and this line becomes inaccurate: remove it then. -->
+  <p class="footer-legal">
+    Built with Llama.&nbsp; All trademarks are the property of their respective owners.
+  </p>
 </footer>
 
 <div class="notif" id="notif">&#x2713;&nbsp; You&rsquo;re on the list. We&rsquo;ll be in touch.</div>
 
-<div class="harmony-overlay" id="harmonyOverlay" aria-hidden="true">
-  <div class="harmony-card">
-    <p class="harmony-line" id="harmonyLine">Let&rsquo;s harmonize.</p>
-  </div>
-  <div class="bloom-stage">
-    <div class="bloom-orb"></div>
-    <div class="bloom-trace" style="transform: rotate(0deg);"></div>
-    <div class="bloom-trace" style="transform: rotate(45deg);"></div>
-    <div class="bloom-trace" style="transform: rotate(90deg);"></div>
-    <div class="bloom-trace" style="transform: rotate(135deg);"></div>
-    <div class="bloom-trace" style="transform: rotate(180deg);"></div>
-    <div class="bloom-trace" style="transform: rotate(225deg);"></div>
-    <div class="bloom-trace" style="transform: rotate(270deg);"></div>
-    <div class="bloom-trace" style="transform: rotate(315deg);"></div>
-    <div class="bloom-console">
-      <p>harmony parent online</p>
-      <p>child agents listening</p>
-      <p>rendering architecture overview</p>
-    </div>
-  </div>
-</div>
 
 <script>
   async function handleSubmit(e) {
@@ -478,308 +367,9 @@
       setTimeout(() => notif.classList.remove('show'), 3800);
     }
   }
-  // ── HARMONY EASTER EGG ──
-  // Synthesized strings on H hover, manifesto card on click, typed console
-  // lines after clicking the line, then a bloom transition into architecture.
-
-  let audioCtx = null;
-  let hoverSwell = null;
-  let clickSwell = null;
-  // When the H is clicked we 'lock' the hover swell so it sustains underneath
-  // the manifesto card instead of stopping when the cursor leaves the H.
-  let interactionLocked = false;
-
-  // Sample buffer for the orchestral chord.  Loaded once on first interaction.
-  let chordBuffer = null;
-  let chordLoadPromise = null;
-
-  function loadChordSample(ctx) {
-    if (chordBuffer) return Promise.resolve(chordBuffer);
-    if (chordLoadPromise) return chordLoadPromise;
-    chordLoadPromise = fetch('/sounds/harmony-chord.mp3')
-      .then((r) => {
-        if (!r.ok) throw new Error('chord sample fetch failed: ' + r.status);
-        return r.arrayBuffer();
-      })
-      .then((buf) => ctx.decodeAudioData(buf))
-      .then((decoded) => { chordBuffer = decoded; return decoded; })
-      .catch((e) => { console.warn('chord sample load failed', e); chordLoadPromise = null; return null; });
-    return chordLoadPromise;
-  }
-
-  // The audio context can only initialize after a user gesture, otherwise the
-  // browser blocks autoplay.  We arm it on the first interaction of any kind,
-  // play 50ms of silence to warm up the audio path, and kick off the sample
-  // download in the background so it is decoded by the time the user hovers.
-  function ensureAudio() {
-    if (audioCtx) {
-      if (audioCtx.state === 'suspended') {
-        try { audioCtx.resume(); } catch (e) { console.warn('audio resume failed', e); }
-      }
-      return audioCtx;
-    }
-    try {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return null;
-      audioCtx = new AC();
-      // Pre-warm: 50ms of pure silence to fill the first audio buffer cleanly
-      const warmGain = audioCtx.createGain();
-      warmGain.gain.value = 0;
-      warmGain.connect(audioCtx.destination);
-      const warmOsc = audioCtx.createOscillator();
-      warmOsc.connect(warmGain);
-      warmOsc.start(audioCtx.currentTime);
-      warmOsc.stop(audioCtx.currentTime + 0.05);
-      // Kick off the sample load in the background
-      loadChordSample(audioCtx);
-    } catch (e) {
-      console.warn('audio context unavailable', e);
-      return null;
-    }
-    return audioCtx;
-  }
-  ['pointerdown', 'mousemove', 'keydown', 'touchstart'].forEach((evt) => {
-    document.addEventListener(evt, ensureAudio, { once: true, passive: true });
-  });
-
-  // playChord plays the loaded orchestral chord sample through a master
-  // envelope and compressor.  No more synthesis -- this is a real recording
-  // of an orchestra playing a C chord, looped so it sustains for as long as
-  // the interaction lasts.  Falls back silently if the sample is not loaded
-  // yet (which can happen if the user hovers within the first ~100ms before
-  // the fetch completes).
-  function playChord(peakGain, attackSec) {
-    const ctx = ensureAudio();
-    if (!ctx) return null;
-    if (!chordBuffer) {
-      // Sample is not decoded yet.  Try to play once it is, but only if the
-      // caller still holds the returned handle (this play is best-effort).
-      let cancelled = false;
-      const handle = {
-        stop() { cancelled = true; }
-      };
-      loadChordSample(ctx).then(() => {
-        if (cancelled || !chordBuffer) return;
-        const real = playChord(peakGain, attackSec);
-        if (real) {
-          handle.stop = real.stop.bind(real);
-        }
-      });
-      return handle;
-    }
-    try {
-      const now = ctx.currentTime;
-
-      // Compressor catches any peaks
-      const comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = -16;
-      comp.knee.value = 8;
-      comp.ratio.value = 4;
-      comp.attack.value = 0.005;
-      comp.release.value = 0.15;
-
-      // Master envelope: linear ramp from true zero, then exponential to peak
-      const master = ctx.createGain();
-      master.gain.setValueAtTime(0, now);
-      master.gain.linearRampToValueAtTime(0.001, now + 0.02);
-      master.gain.exponentialRampToValueAtTime(peakGain, now + attackSec);
-
-      // BufferSource plays the loaded chord sample.  Loop so the chord
-      // sustains for as long as the interaction lasts.
-      const source = ctx.createBufferSource();
-      source.buffer = chordBuffer;
-      source.loop = true;
-
-      source.connect(master);
-      master.connect(comp);
-      comp.connect(ctx.destination);
-      source.start(now);
-
-      return {
-        stop(releaseSec) {
-          const t = ctx.currentTime;
-          const r = releaseSec || 0.7;
-          try {
-            master.gain.cancelScheduledValues(t);
-            master.gain.setValueAtTime(Math.max(master.gain.value, 0.0001), t);
-            master.gain.exponentialRampToValueAtTime(0.0001, t + r);
-            master.gain.linearRampToValueAtTime(0, t + r + 0.05);
-            try { source.stop(t + r + 0.1); } catch (e) {}
-          } catch (e) {
-            console.warn('chord stop failed', e);
-          }
-        }
-      };
-    } catch (e) {
-      console.warn('chord play failed', e);
-      return null;
-    }
-  }
-
-  const eggButton = document.getElementById('harmonyEgg');
-  const overlay = document.getElementById('harmonyOverlay');
-  const harmonyLine = document.getElementById('harmonyLine');
-
-  // Cache the original console text and measure each line's natural width
-  // BEFORE clearing it.  We pin the bloom-console's min-width to the widest
-  // line so the container does not grow during typing.  Without this pin,
-  // the container's width: max-content combined with translate(-50%, -50%)
-  // centering causes it to expand outward from page center as line 1 types,
-  // which makes line 1 visually scroll in from the right while lines 2 and 3
-  // type normally left-to-right.  Clearing the text also prevents a one-frame
-  // flash of visible content when .typing is added.
-  const bloomConsoleEl = document.querySelector('.bloom-console');
-  let maxBloomLineWidth = 0;
-  document.querySelectorAll('.bloom-console p').forEach((line) => {
-    line.dataset.text = line.textContent;
-    if (line.offsetWidth > maxBloomLineWidth) maxBloomLineWidth = line.offsetWidth;
-    line.textContent = '';
-  });
-  if (bloomConsoleEl && maxBloomLineWidth > 0) {
-    bloomConsoleEl.style.minWidth = maxBloomLineWidth + 'px';
-  }
-
-  function openOverlay() {
-    overlay.classList.add('open');
-    overlay.setAttribute('aria-hidden', 'false');
-    document.body.style.overflow = 'hidden';
-  }
-  function closeOverlay() {
-    overlay.classList.remove('open');
-    overlay.classList.remove('typing');
-    overlay.classList.remove('bloom');
-    overlay.setAttribute('aria-hidden', 'true');
-    document.body.style.overflow = '';
-    interactionLocked = false;
-    if (hoverSwell) { hoverSwell.stop(0.5); hoverSwell = null; }
-    if (clickSwell) { clickSwell.stop(0.3); clickSwell = null; }
-  }
-
-  // Hover the H: swell up, brighter pulse handled by CSS :hover
-  eggButton.addEventListener('mouseenter', () => {
-    if (hoverSwell) return;
-    hoverSwell = playChord(0.13, 0.55);
-  });
-  eggButton.addEventListener('mouseleave', () => {
-    // Once locked in (after a click) the swell sustains regardless of cursor
-    if (interactionLocked) return;
-    if (hoverSwell) { hoverSwell.stop(0.7); hoverSwell = null; }
-  });
-
-  // Click the H: lock in the hover swell so it sustains underneath the
-  // manifesto card, then open the card.  No new chord is started here.
-  eggButton.addEventListener('click', (e) => {
-    e.stopPropagation();
-    interactionLocked = true;
-    // If somehow the user got here without a hover swell (keyboard), start one
-    if (!hoverSwell) hoverSwell = playChord(0.13, 0.55);
-    openOverlay();
-  });
-  // Keyboard accessibility: Enter or Space on the focused H opens the card
-  eggButton.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      interactionLocked = true;
-      if (!hoverSwell) hoverSwell = playChord(0.13, 0.55);
-      openOverlay();
-    }
-  });
-
-  // Type a single line character by character with a blinking cursor.
-  // The original text is cached on first run so re-runs work cleanly.
-  function typeLine(line, doneCallback) {
-    if (!line.dataset.text) line.dataset.text = line.textContent;
-    const text = line.dataset.text;
-    line.textContent = '';
-    line.classList.add('typing-now');
-    let charIdx = 0;
-    const tick = setInterval(() => {
-      if (charIdx >= text.length) {
-        clearInterval(tick);
-        // Brief pause with the cursor still at the end of the line
-        setTimeout(() => {
-          line.classList.remove('typing-now');
-          doneCallback();
-        }, 280);
-        return;
-      }
-      line.textContent += text.charAt(charIdx);
-      charIdx++;
-    }, 32);
-  }
-
-  // Walk through the console lines one at a time, then trigger the bloom.
-  // Respects prefers-reduced-motion by showing all lines instantly.
-  function typeConsoleLines() {
-    const lines = document.querySelectorAll('.bloom-console p');
-    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduced) {
-      lines.forEach((line) => {
-        if (!line.dataset.text) line.dataset.text = line.textContent;
-        line.textContent = line.dataset.text;
-      });
-      setTimeout(triggerBloom, 600);
-      return;
-    }
-    let idx = 0;
-    function nextLine() {
-      if (idx >= lines.length) {
-        setTimeout(triggerBloom, 420);
-        return;
-      }
-      typeLine(lines[idx], () => {
-        idx++;
-        nextLine();
-      });
-    }
-    nextLine();
-  }
-
-  // After the lines have typed in, fire the bloom and navigate
-  function triggerBloom() {
-    overlay.classList.add('bloom');
-    setTimeout(() => {
-      if (clickSwell) { clickSwell.stop(0.55); clickSwell = null; }
-      if (hoverSwell) { hoverSwell.stop(0.55); hoverSwell = null; }
-      window.location.href = '/architecture.html';
-    }, 1700);
-  }
-
-  // Click the line: stop the hover swell, kick off the bigger click chord,
-  // fade the card, type the console lines, bloom, then navigate.
-  harmonyLine.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (overlay.classList.contains('typing') || overlay.classList.contains('bloom')) return;
-    if (hoverSwell) { hoverSwell.stop(0.4); hoverSwell = null; }
-    clickSwell = playChord(0.22, 0.45);
-    overlay.classList.add('typing');
-    // Wait for the card to fade out, then start typing the console lines
-    setTimeout(typeConsoleLines, 480);
-  });
-
-  // Click the dim background closes the overlay (only before typing starts)
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay && !overlay.classList.contains('typing') && !overlay.classList.contains('bloom')) {
-      closeOverlay();
-    }
-  });
-
-  // Escape closes the overlay before typing starts
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && overlay.classList.contains('open') && !overlay.classList.contains('typing') && !overlay.classList.contains('bloom')) {
-      closeOverlay();
-    }
-  });
-
-  // If the user navigates away during the bloom sequence (e.g. to the
-  // architecture page) and then comes back -- either via a fresh load or via
-  // the browser's back-forward cache -- the overlay would otherwise still be
-  // showing the final bloom/typing state with no way out.  Reset it on every
-  // pageshow so the landing page always starts clean.
-  window.addEventListener('pageshow', () => {
-    closeOverlay();
-  });
 </script>
+
+<script src="/chat-widget.js" defer></script>
 
 </body>
 </html>

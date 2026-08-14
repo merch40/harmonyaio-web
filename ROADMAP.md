@@ -36,10 +36,26 @@ page shouldn't wait on a CRM project.
       SSL-checks the cert (7-day expiry warning). *(deployed 2026-08-14 —
       note: a Claude cloud routine was tried first and retired; its sandbox
       egress proxy cannot reach harmonyaio.com)*
-- [ ] Optional welcome email: authenticate harmonyaio.com as a Brevo sending
-      domain (DKIM/SPF records in Cloudflare DNS), create a transactional
-      template with sender noreply@harmonyaio.com, then
-      `npx wrangler secret put BREVO_WELCOME_TEMPLATE_ID`.
+- [x] Welcome email — **built as a Brevo automation, not a transactional send**
+      *(done 2026-08-14)*. The automation `Welcome message` triggers on a
+      contact being added to list #6 (`Harmony AIO Early Access`) and sends
+      subject "You're on the list." from `Harmony AIO <hello@harmonyaio.com>`.
+      Copy lives in the Brevo template, so changing it needs no deploy.
+      - The originally planned transactional route
+        (`BREVO_WELCOME_TEMPLATE_ID` + `sendWelcomeEmail()` in the worker) was
+        **removed**, not deferred. Running both would email every new signup
+        twice. Do not reinstate the secret; see the note in `wrangler.jsonc`.
+      - Sender is `hello@`, not `noreply@`, because the email invites a reply.
+        `hello@harmonyaio.com` is a Cloudflare Email Routing rule forwarding to
+        beau.mundt@outlook.com — no mailbox hosting. Brevo's reply-to override
+        (which pointed at `noreply@merch40.xyz`) was cleared.
+      - harmonyaio.com was already authenticated in Brevo (DKIM + DMARC).
+        Email Routing added its own MX, SPF and DKIM records; there was no
+        prior MX or SPF on the zone, so nothing collided.
+- [ ] Activate the automation and verify end to end with a real signup from the
+      live site (a plus-addressed test address). The trigger does not fire while
+      the automation is Inactive, and Brevo does not backfill existing contacts.
+      *(Beau)*
 
 ### Phase 1 — account ownership (near term, independent of any code)
 

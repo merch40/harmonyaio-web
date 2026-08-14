@@ -7,14 +7,36 @@
     "binding": "ASSETS",
     "not_found_handling": "404-page"
   },
+  // Site assistant (/api/chat). Workers AI is the default provider and needs
+  // no secret. Setting ANTHROPIC_API_KEY switches the endpoint to Claude,
+  // which holds a refusal far better under a jailbreak attempt:
+  //   npx wrangler secret put ANTHROPIC_API_KEY
+  // The knowledge boundary lives in src/chat_knowledge.js. Editing FACTS in
+  // that file publishes copy: treat it like editing the home page.
+  "ai": {
+    "binding": "AI"
+  },
+  // 20 messages per minute per IP. A public endpoint with a model behind it
+  // is a bill waiting to happen; namespace_id is any stable integer string.
+  "unsafe": {
+    "bindings": [
+      {
+        "name": "CHAT_RATE_LIMIT",
+        "type": "ratelimit",
+        "namespace_id": "1001",
+        "simple": { "limit": 20, "period": 60 }
+      }
+    ]
+  },
   // REQUIRED OUT-OF-BAND CONFIG — the newsletter signup (/api/signup) needs
   // two values that must be set as SECRETS, never as dashboard plaintext vars:
   //   npx wrangler secret put BREVO_API_KEY   # Brevo -> Settings -> API keys
   //   npx wrangler secret put BREVO_LIST_ID   # numeric list id from Brevo -> Contacts -> Lists
-  // Optional:
-  //   npx wrangler secret put BREVO_WELCOME_TEMPLATE_ID  # transactional template id;
-  //     when set, new signups get a welcome email from the template's sender
-  //     (requires harmonyaio.com authenticated as a Brevo sending domain).
+  // DO NOT add BREVO_WELCOME_TEMPLATE_ID. The welcome email is a Brevo
+  // automation ("Welcome message") triggered by the contact landing on the
+  // early access list, not a transactional send from this worker. The
+  // transactional path was removed on 2026-08-14; reinstating it would email
+  // every new signup twice.
   // Secrets survive `wrangler deploy`; dashboard plaintext vars DO NOT — any
   // deploy replaces the whole vars set with this file's "vars" block, which is
   // how the signup broke in July 2026. If either value is missing the endpoint

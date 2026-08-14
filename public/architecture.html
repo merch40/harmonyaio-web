@@ -240,6 +240,7 @@
     .footer { padding: 32px 24px; text-align: center; border-top: none; }
     .footer-copy { font-size: 12px; color: rgba(240,237,232,0.25); letter-spacing: 0.05em; }
     .footer-copy a { color: var(--teal); text-decoration: none; }
+    .footer-legal { margin-top: 8px; font-size: 10.5px; letter-spacing: 0.04em; color: rgba(240,237,232,0.16); }
 
     /* ── FADE-IN ANIMATIONS ── */
     .fade-in { opacity: 0; transform: translateY(20px); animation: fadeUp 0.7s ease forwards; }
@@ -362,17 +363,20 @@
     </div>
   </div>
 
-  <!-- DEPLOYMENT MODELS -->
+  <!-- MODEL CHOICE -->
+  <!-- These cards are about which model Harmony reasons with. Not about
+       hosting. Reworded 2026-08-14. -->
+  <div class="sec-label">The Brain Is A Model.  You Choose Which One.</div>
   <div class="deploy-row">
     <div class="deploy-box">
-      <span class="deploy-tag onprem">On-Premises / Local LLM</span>
-      <h3>Private Deployment</h3>
-      <p>Purpose-built IT LLM hosted within your network. No data leaves the environment. Built for enterprise, government, and regulated industries. Consumer version: pre-configured appliance (Mac Mini or similar).</p>
+      <span class="deploy-tag onprem">Local Model</span>
+      <h3>Your Own Model</h3>
+      <p>Point Harmony at a model running on your own hardware. Ollama on a box in your rack. Nothing ever leaves your network. Built for enterprise, government, and regulated industries. Consumer version: a pre-configured appliance.</p>
     </div>
     <div class="deploy-box">
-      <span class="deploy-tag cloud">Cloud / SaaS</span>
-      <h3>Managed Cloud</h3>
-      <p>Managed cloud AI backend, optionally integrated with M365 Copilot or API-based knowledge repositories. Lower barrier to entry. Consumer version: lightweight app download, zero hardware required.</p>
+      <span class="deploy-tag cloud">Hosted Model</span>
+      <h3>A Model You Already Pay For</h3>
+      <p>Point Harmony at Claude, ChatGPT, or Microsoft Copilot instead. No GPU to buy and no model to run. Optionally wired into M365 Copilot or your own knowledge repositories. Consumer version: a lightweight app, zero hardware.</p>
     </div>
   </div>
 
@@ -464,6 +468,13 @@
   <footer class="footer">
     <p class="footer-copy">
     &copy; 2026 Harmony AIO
+    </p>
+    <!-- Attribution required by the Llama 3.3 Community License section 1.b.i
+         while the site assistant runs on Workers AI's Llama model. If
+         ANTHROPIC_API_KEY is ever set on the worker the assistant switches to
+         Claude, and this line becomes inaccurate: remove it then. -->
+    <p class="footer-legal">
+      Built with Llama.&nbsp; All trademarks are the property of their respective owners.
     </p>
   </footer>
 
