@@ -26,9 +26,16 @@ page shouldn't wait on a CRM project.
       `wrangler.jsonc` header comment for the commands and the July 2026
       vars-wipe incident that killed them). *(Beau)*
 - [x] Verify: `POST /api/signup` returns `{"success":true}`. *(done 2026-08-14)*
-- [ ] `wrangler deploy` the signup health probe (`GET /api/signup/health` + weekly
-      cron). The cron doubles as Brevo key keep-alive; a weekly scheduled check
-      against the endpoint notifies on failure so the form can't die silently again.
+- [x] `wrangler deploy` the signup health probe (`GET /api/signup/health` + weekly
+      cron; the cron doubles as Brevo key keep-alive). *(deployed 2026-08-14)*
+- [x] External monitor: Azure App Insights standard availability test
+      `signup-health-harmonyaio` (HAR-RG, PA-US-MSP-Playground) probes the health
+      endpoint every 15 min from 3 US locations; alert
+      `alert-harmonyaio-signup-health` emails beau.mundt@outlook.com +
+      managed1staffalerts@profad.com when 2+ locations fail. The test also
+      SSL-checks the cert (7-day expiry warning). *(deployed 2026-08-14 —
+      note: a Claude cloud routine was tried first and retired; its sandbox
+      egress proxy cannot reach harmonyaio.com)*
 - [ ] Optional welcome email: authenticate harmonyaio.com as a Brevo sending
       domain (DKIM/SPF records in Cloudflare DNS), create a transactional
       template with sender noreply@harmonyaio.com, then
