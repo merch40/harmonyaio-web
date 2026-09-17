@@ -13,6 +13,7 @@ import {
   handleAdminAuth,
   handleAdminSession,
   handleAdminLogout,
+  handleAdminAudit,
 } from "./admin";
 import { handleAdminPage } from "./admin_ui";
 import { handleFavicon } from "./favicon";
@@ -46,6 +47,7 @@ export default {
       if (method === "POST" && path === "/admin/logout") return await handleAdminLogout(req, env);
       if (method === "GET" && path === "/admin/session") return await handleAdminSession(req, env);
       if (method === "GET" && path === "/admin/licenses") return await handleAdminLicensesList(req, env);
+      if (method === "GET" && path === "/admin/audit") return await handleAdminAudit(req, env);
       if (method === "POST" && path === "/admin/license") return await handleAdminIssue(req, env);
       if (method === "POST" && path === "/admin/license/revoke") return await handleAdminRevoke(req, env);
       if (method === "POST" && path === "/admin/license/remove") return await handleAdminRemove(req, env);

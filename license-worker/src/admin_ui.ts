@@ -151,6 +151,20 @@ const PAGE = `<!doctype html>
   .map-row .dst { color:var(--teal); font:12px/1.6 var(--mono); text-align:right; }
   .footer { display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; border-top:1px solid var(--card-border); padding-top:24px; color:var(--dim); font-size:12px; }
   .footer a:hover { color:var(--teal); }
+  .audit-notice { display:block; color:var(--teal); font-size:13px; margin-top:18px; }
+  .audit-list { list-style:none; padding:0; margin:0; }
+  .audit-event { padding:18px 0; border-top:1px solid var(--card-border); }
+  .audit-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; }
+  .audit-head strong { font-weight:500; }
+  .audit-meta { color:var(--dim); font-size:12px; margin:8px 0 0; overflow-wrap:anywhere; }
+  .audit-event details { margin-top:12px; }
+  .audit-event summary { cursor:pointer; color:var(--teal); font-size:13px; }
+  .audit-changes { margin:12px 0 0; padding:14px; background:var(--field); border-radius:6px; font-size:13px; }
+  .audit-changes dt { color:var(--dim); margin-top:12px; }
+  .audit-changes dt:first-child { margin-top:0; }
+  .audit-changes dd { margin:4px 0 0; overflow-wrap:anywhere; white-space:pre-wrap; }
+  .pill.denied,.pill.rate_limited { color:var(--amber); border:1px solid var(--amber); }
+  #auditMore { margin-top:16px; }
   @media(max-width:600px) {
     .header-inner { padding:18px 20px; gap:12px; flex-wrap:wrap; }
     .brand { gap:10px; } .wordmark-h { font-size:30px; padding-right:10px; }
@@ -186,6 +200,7 @@ const PAGE = `<!doctype html>
     <p class="eyebrow">Administration</p>
     <h1>License control, clearly.</h1>
     <p>Issue keys, manage capacity, and keep customer licenses in view.</p>
+    <a id="auditNotice" class="audit-notice" href="#auditCard" hidden>View admin activity ↓</a>
   </div>
 
   <section id="loginCard" class="card accent" hidden>
@@ -256,6 +271,15 @@ const PAGE = `<!doctype html>
     </table></div>
   </section>
 
+  <section id="auditCard" class="card" hidden>
+    <h2>Admin activity <button id="auditRefresh" type="button" class="ghost">Show latest</button></h2>
+    <p class="muted">License changes and sign-in activity, newest first. Shared admin access identifies a session, not an individual person.</p>
+    <p id="auditStatus" class="muted" role="status">Loading activity…</p>
+    <div id="auditErr" class="err" role="alert"></div>
+    <ol id="auditList" class="audit-list"></ol>
+    <button id="auditMore" type="button" class="ghost" hidden>Load older activity</button>
+  </section>
+
   <section id="settingsCard" class="card accent" hidden>
     <h2>Administration settings</h2>
     <div class="settings-sub">
@@ -321,6 +345,8 @@ const PAGE = `<!doctype html>
       show($('issueCard'), authed);
       show($('listCard'), authed);
       show($('settingsCard'), authed);
+      show($('auditCard'), authed);
+      show($('auditNotice'), authed);
       show($('logoutBtn'), authed);
       if (authed) loadList();
     });
@@ -644,6 +670,7 @@ const PAGE = `<!doctype html>
   }
 
   function loadList() {
+    loadAudit(false);
     api('/admin/licenses').then(function (d) {
       var body = $('licenseBody');
       body.innerHTML = '';
@@ -677,6 +704,99 @@ const PAGE = `<!doctype html>
       });
     }).catch(function () { /* list errors are non-fatal */ });
   }
+
+  // Read-only audit feed. Untrusted customer text is rendered with textContent.
+  var auditCursor = null;
+  var auditLoading = false;
+  var auditShowingOlder = false;
+  var auditLabels = {
+    'license.created': 'License created', 'license.updated': 'License updated',
+    'license.revoked': 'License revoked', 'license.removed': 'License removed',
+    'license.released': 'Binding released', 'admin.login': 'Admin sign-in', 'admin.logout': 'Admin sign-out'
+  };
+  function auditValue(value) {
+    if (value === null || value === undefined || value === '') return 'Not set';
+    if (Array.isArray(value)) return value.length ? value.map(function (pack) { return pack.qty + ' × ' + pack.size + '-endpoint pack'; }).join(', ') : 'None';
+    return typeof value === 'object' ? JSON.stringify(value) : String(value);
+  }
+  function auditItem(event) {
+    var item = document.createElement('li');
+    item.className = 'audit-event';
+    var head = document.createElement('div');
+    head.className = 'audit-head';
+    var title = document.createElement('strong');
+    var snapshot = event.after || event.before || {};
+    title.textContent = (auditLabels[event.action] || event.action) + (snapshot.organization ? ' · ' + snapshot.organization : '') + (event.license_hint ? ' · ' + event.license_hint : '');
+    var badge = document.createElement('span');
+    badge.className = 'pill ' + (event.outcome === 'success' ? 'active' : 'denied');
+    badge.textContent = event.outcome === 'rate_limited' ? 'Rate limited' : event.outcome;
+    head.appendChild(title); head.appendChild(badge); item.appendChild(head);
+    var meta = document.createElement('p');
+    meta.className = 'audit-meta';
+    var actor = event.actor === 'shared-admin-browser' ? 'Shared admin · browser' : event.actor === 'shared-admin-api' ? 'Shared admin · API' : 'Unauthenticated';
+    meta.textContent = new Date(event.occurred_at).toLocaleString() + ' · ' + actor + ' · IP: ' + event.client_ip + (event.session_id ? ' · Session: ' + event.session_id : '');
+    item.appendChild(meta);
+    var details = document.createElement('details');
+    var summary = document.createElement('summary');
+    summary.textContent = 'View event details'; details.appendChild(summary);
+    var fields = document.createElement('dl'); fields.className = 'audit-changes';
+    var before = event.before || {}, after = event.after || {};
+    var keys = Object.keys(Object.assign({}, before, after));
+    var changed = 0;
+    keys.forEach(function (key) {
+      if (JSON.stringify(before[key]) === JSON.stringify(after[key])) return;
+      changed++;
+      var label = document.createElement('dt');
+      var fieldLabels = { organization: 'Organization', contact_email: 'Contact email', company_id: 'Company ID', tier: 'Tier', pack_endpoints: 'Additional endpoints', packs: 'Endpoint packs', notes: 'Notes', expires_at: 'Expires', revoked_at: 'Revoked', revoked_reason: 'Revocation reason', active_bindings: 'Active bindings' };
+      label.textContent = fieldLabels[key] || key;
+      var value = document.createElement('dd');
+      value.textContent = auditValue(before[key]) + ' → ' + auditValue(after[key]);
+      fields.appendChild(label); fields.appendChild(value);
+    });
+    if (!changed && keys.length) {
+      var unchanged = document.createElement('dd'); unchanged.textContent = 'No stored values changed.'; fields.appendChild(unchanged);
+    }
+    var requestLabel = document.createElement('dt'); requestLabel.textContent = 'Request reference';
+    var requestValue = document.createElement('dd'); requestValue.textContent = event.event_id;
+    fields.appendChild(requestLabel); fields.appendChild(requestValue);
+    var agentLabel = document.createElement('dt'); agentLabel.textContent = 'Browser / client (reported)';
+    var agentValue = document.createElement('dd'); agentValue.textContent = event.user_agent;
+    fields.appendChild(agentLabel); fields.appendChild(agentValue);
+    details.appendChild(fields); item.appendChild(details);
+    return item;
+  }
+  function loadAudit(older) {
+    if (auditLoading || $('auditCard').hidden) return;
+    auditLoading = true;
+    $('auditErr').textContent = '';
+    $('auditRefresh').disabled = true; $('auditMore').disabled = true;
+    api('/admin/audit' + (older && auditCursor ? '?before=' + auditCursor : '')).then(function (data) {
+      // A sign-out may finish while this request is in flight.
+      if ($('auditCard').hidden) return;
+      if (!older) { $('auditList').textContent = ''; auditShowingOlder = false; }
+      else auditShowingOlder = true;
+      (data.events || []).forEach(function (event) { $('auditList').appendChild(auditItem(event)); });
+      auditCursor = data.next_cursor;
+      show($('auditMore'), !!auditCursor);
+      $('auditStatus').textContent = $('auditList').children.length ? 'Times shown in your local time zone. Activity refreshes every 30 seconds while viewing the latest page.' : 'No activity recorded yet. History starts when audit logging is enabled.';
+      if (!older && data.events && data.events.length) {
+        var latest = data.events[0];
+        $('auditNotice').textContent = 'Latest activity: ' + (auditLabels[latest.action] || latest.action) + ' · ' + new Date(latest.occurred_at).toLocaleString() + ' ↓';
+      }
+    }).catch(function () {
+      $('auditErr').textContent = 'Activity could not be loaded. Use Show latest to try again.';
+      $('auditStatus').textContent = '';
+      $('auditNotice').textContent = 'Admin activity unavailable — check activity log ↓';
+    }).finally(function () {
+      auditLoading = false;
+      $('auditRefresh').disabled = false; $('auditMore').disabled = false;
+    });
+  }
+  $('auditRefresh').addEventListener('click', function () { loadAudit(false); });
+  $('auditMore').addEventListener('click', function () { loadAudit(true); });
+  setInterval(function () {
+    if (!document.hidden && !auditShowingOlder && !$('auditList').querySelector('details[open]')) loadAudit(false);
+  }, 30000);
 
   syncPack();
   syncTerm();

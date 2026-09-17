@@ -11,6 +11,7 @@ export interface Session {
   email: string;
   exp: number; // unix seconds
   admin?: boolean;
+  id?: string; // Random admin-session identifier for audit correlation, not a credential.
 }
 
 // ---------------- request flow ----------------
@@ -73,9 +74,9 @@ export async function handleAuthVerify(req: Request, env: Env): Promise<Response
 
 // ---------------- session signing ----------------
 
-export async function issueSessionCookie(email: string, env: Env, admin = false): Promise<string> {
+export async function issueSessionCookie(email: string, env: Env, admin = false, id = crypto.randomUUID()): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_HOURS * 3600;
-  const payload: Session = admin ? { email, exp, admin: true } : { email, exp };
+  const payload: Session = admin ? { email, exp, admin: true, id } : { email, exp };
   const value = await signSession(payload, env.SESSION_SECRET);
   // SameSite=Lax so the magic-link redirect from email carries the cookie.
   return `${SESSION_COOKIE}=${value}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_HOURS * 3600}`;

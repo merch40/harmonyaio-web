@@ -16,6 +16,23 @@ export function getTestEnv(): TestEnv {
 }
 
 const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS admin_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE,
+  occurred_at TEXT NOT NULL,
+  action TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  session_id TEXT,
+  client_ip TEXT NOT NULL,
+  user_agent TEXT NOT NULL,
+  license_hash TEXT,
+  license_hint TEXT,
+  before_json TEXT,
+  after_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_license ON admin_audit(license_hash, id DESC);
+CREATE TABLE IF NOT EXISTS admin_audit_staging (event_id TEXT PRIMARY KEY, before_json TEXT);
 CREATE TABLE IF NOT EXISTS licenses (
   license_key    TEXT PRIMARY KEY,
   tier           TEXT NOT NULL,
@@ -93,6 +110,8 @@ export async function applySchema(): Promise<void> {
 export async function resetDB(): Promise<void> {
   const e = getTestEnv();
   for (const t of [
+    "admin_audit",
+    "admin_audit_staging",
     "rate_limits",
     "magic_links",
     "release_cooldowns",

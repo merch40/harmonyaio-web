@@ -1,6 +1,7 @@
 import { WorkerError, badRequest, unauthorized } from "./errors";
 import { jsonResponse, safeJSON } from "./activate";
-import { nowISO, getLicense, revokeLicense, deleteLicense, forceReleaseLicense } from "./db";
+import { nowISO, getLicense } from "./db";
+import { auditAuth, auditMutation, fingerprint, listAudit, type AuditActor } from "./audit";
 import { getSession, issueSessionCookie, clearSessionCookie } from "./magic_link";
 import { checkRateLimit, clientIP } from "./rate_limit";
 import type { Env, Pack, Tier } from "./types";
@@ -56,16 +57,19 @@ function normalizePacks(packs: Pack[] | undefined): Pack[] {
 
 // requireAdminAuth accepts EITHER the X-Admin-Secret header (server-to-server /
 // CI / billing automation) OR an admin session cookie (the /admin web UI).
-export async function requireAdminAuth(req: Request, env: Env): Promise<void> {
+export async function requireAdminAuth(req: Request, env: Env): Promise<AuditActor> {
   const provided = req.headers.get("x-admin-secret");
-  if (provided && env.ADMIN_SECRET && secureEq(provided, env.ADMIN_SECRET)) return;
+  if (provided && env.ADMIN_SECRET && secureEq(provided, env.ADMIN_SECRET)) return { kind: "shared-admin-api", sessionId: null };
   const session = await getSession(req, env);
-  if (session?.admin) return;
+  if (session?.admin) {
+    const token = (req.headers.get("cookie") || "").split(/;\s*/).find(c => c.startsWith("harmony_session=")) || "";
+    return { kind: "shared-admin-browser", sessionId: session.id || "legacy-" + (await fingerprint(token)).slice(0, 16) };
+  }
   throw unauthorized("admin secret missing or wrong");
 }
 
 export async function handleAdminIssue(req: Request, env: Env): Promise<Response> {
-  await requireAdminAuth(req, env);
+  const actor = await requireAdminAuth(req, env);
 
   const body = (await safeJSON(req)) as AdminIssueRequest | null;
   if (!body) throw badRequest("body required");
@@ -97,7 +101,7 @@ export async function handleAdminIssue(req: Request, env: Env): Promise<Response
   }
 
   try {
-    await env.DB.prepare(
+    await auditMutation(req, env, actor, "license.created", key, [env.DB.prepare(
       `INSERT INTO licenses (license_key, tier, pack_size, packs, issued_to_org, contact_email, company_id, issued_at, expires_at, notes)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
     )
@@ -112,10 +116,12 @@ export async function handleAdminIssue(req: Request, env: Env): Promise<Response
         nowISO(),
         expiresAt,
         body.notes ?? null,
-      )
-      .run();
+      )]);
   } catch (err) {
-    throw new WorkerError(409, "bad_request", `failed to insert license: ${(err as Error).message}`);
+    if ((err as Error).message.includes("UNIQUE constraint failed: licenses.license_key")) {
+      throw new WorkerError(409, "bad_request", "license key already exists");
+    }
+    throw new WorkerError(500, "internal_error", "could not save the license and its audit record");
   }
 
   return jsonResponse(200, {
@@ -162,37 +168,45 @@ export async function handleAdminLicensesList(req: Request, env: Env): Promise<R
 // revoke + remove. Admin-gated, and the X-Admin-Secret header path makes them
 // safe to call from a billing system (e.g. on subscription cancellation).
 export async function handleAdminRevoke(req: Request, env: Env): Promise<Response> {
-  await requireAdminAuth(req, env);
+  const actor = await requireAdminAuth(req, env);
   const body = (await safeJSON(req)) as KeyRequest | null;
   const key = body?.license_key?.trim();
   if (!key) throw badRequest("license_key required");
   const existing = await getLicense(env.DB, key);
   if (!existing) throw new WorkerError(404, "not_found", "license not found");
-  await revokeLicense(env.DB, key, body?.reason?.trim() || "revoked");
+  await auditMutation(req, env, actor, "license.revoked", key, [env.DB.prepare(
+    "UPDATE licenses SET revoked_at = COALESCE(revoked_at, ?2), revoked_reason = COALESCE(revoked_reason, ?3) WHERE license_key = ?1",
+  ).bind(key, nowISO(), body?.reason?.trim() || "revoked")]);
   return jsonResponse(200, { ok: true, license_key: key, revoked: true });
 }
 
 export async function handleAdminRemove(req: Request, env: Env): Promise<Response> {
-  await requireAdminAuth(req, env);
+  const actor = await requireAdminAuth(req, env);
   const body = (await safeJSON(req)) as KeyRequest | null;
   const key = body?.license_key?.trim();
   if (!key) throw badRequest("license_key required");
   const existing = await getLicense(env.DB, key);
   if (!existing) throw new WorkerError(404, "not_found", "license not found");
-  await deleteLicense(env.DB, key);
+  const deletes = ["instances", "activations", "telemetry", "release_cooldowns", "licenses"].map(
+    table => env.DB.prepare(`DELETE FROM ${table} WHERE license_key = ?1`).bind(key),
+  );
+  await auditMutation(req, env, actor, "license.removed", key, deletes);
   return jsonResponse(200, { ok: true, license_key: key, removed: true });
 }
 
 // handleAdminForceRelease unbinds a license from its current instance with no
 // cooldown, so the key can re-activate on a new server. Admin-only.
 export async function handleAdminForceRelease(req: Request, env: Env): Promise<Response> {
-  await requireAdminAuth(req, env);
+  const actor = await requireAdminAuth(req, env);
   const body = (await safeJSON(req)) as KeyRequest | null;
   const key = body?.license_key?.trim();
   if (!key) throw badRequest("license_key required");
   const existing = await getLicense(env.DB, key);
   if (!existing) throw new WorkerError(404, "not_found", "license not found");
-  const released = await forceReleaseLicense(env.DB, key);
+  const [result] = await auditMutation(req, env, actor, "license.released", key, [env.DB.prepare(
+    "UPDATE instances SET released_at = ?2 WHERE license_key = ?1 AND released_at IS NULL",
+  ).bind(key, nowISO())]);
+  const released = result.meta.changes;
   return jsonResponse(200, { ok: true, license_key: key, released });
 }
 
@@ -202,7 +216,7 @@ export async function handleAdminForceRelease(req: Request, env: Env): Promise<R
 // key: the next /validate rebuilds the blob from this row, so the customer's
 // server grows on its next re-check. Tier and expiry stay re-issue territory.
 export async function handleAdminUpdate(req: Request, env: Env): Promise<Response> {
-  await requireAdminAuth(req, env);
+  const actor = await requireAdminAuth(req, env);
   const body = (await safeJSON(req)) as AdminUpdateRequest | null;
   const key = body?.license_key?.trim();
   if (!key) throw badRequest("license_key required");
@@ -228,11 +242,10 @@ export async function handleAdminUpdate(req: Request, env: Env): Promise<Respons
     packEndpointTotal = packs.reduce((sum, p) => sum + p.size * p.qty, 0);
   }
 
-  await env.DB.prepare(
+  await auditMutation(req, env, actor, "license.updated", key, [env.DB.prepare(
     `UPDATE licenses SET issued_to_org = ?2, contact_email = ?3, company_id = ?4, notes = ?5, packs = ?6, pack_size = ?7 WHERE license_key = ?1`,
   )
-    .bind(key, org, email, companyId, notes, packsJSON, packEndpointTotal)
-    .run();
+    .bind(key, org, email, companyId, notes, packsJSON, packEndpointTotal)]);
   return jsonResponse(200, { ok: true, license_key: key, packs: packsJSON ? (JSON.parse(packsJSON) as Pack[]) : [] });
 }
 
@@ -245,14 +258,18 @@ export async function handleAdminUpdate(req: Request, env: Env): Promise<Respons
 export async function handleAdminAuth(req: Request, env: Env): Promise<Response> {
   const ip = clientIP(req);
   if (!(await checkRateLimit(env.DB, `admin-auth:ip:${ip}`, 10))) {
+    await auditAuth(req, env, { kind: "unauthenticated", sessionId: null }, "admin.login", "rate_limited");
     throw new WorkerError(429, "rate_limited", "too many login attempts, slow down");
   }
   const body = (await safeJSON(req)) as { password?: string } | null;
   const password = body?.password ?? "";
   if (!env.ADMIN_SECRET || !secureEq(password, env.ADMIN_SECRET)) {
+    await auditAuth(req, env, { kind: "unauthenticated", sessionId: null }, "admin.login", "denied");
     throw unauthorized("invalid admin password");
   }
-  const cookie = await issueSessionCookie("admin", env, true);
+  const sessionId = crypto.randomUUID();
+  const cookie = await issueSessionCookie("admin", env, true, sessionId);
+  await auditAuth(req, env, { kind: "shared-admin-browser", sessionId }, "admin.login", "success");
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
     headers: { "content-type": "application/json", "set-cookie": cookie },
@@ -264,11 +281,20 @@ export async function handleAdminSession(req: Request, env: Env): Promise<Respon
   return jsonResponse(200, { admin: session?.admin === true });
 }
 
-export async function handleAdminLogout(_req: Request, _env: Env): Promise<Response> {
+export async function handleAdminLogout(req: Request, env: Env): Promise<Response> {
+  if ((await getSession(req, env))?.admin) {
+    const actor = await requireAdminAuth(req, env);
+    await auditAuth(req, env, actor, "admin.logout", "success");
+  }
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
     headers: { "content-type": "application/json", "set-cookie": clearSessionCookie() },
   });
+}
+
+export async function handleAdminAudit(req: Request, env: Env): Promise<Response> {
+  await requireAdminAuth(req, env);
+  return listAudit(req, env);
 }
 
 // addMonthsISO returns now + n calendar months (UTC, second precision), clamped
