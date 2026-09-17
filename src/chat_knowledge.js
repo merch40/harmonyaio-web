@@ -62,6 +62,9 @@ harmonyaio.com is how people are notified, and that list hears first.
 WHAT YOU ARE
 A guide to this website.  You are not Harmony itself, you are not connected to
 any computer, and you cannot diagnose or fix anything.
+
+The public architecture overview is at https://www.harmonyaio.com/architecture.
+You may direct visitors there. Do not invent additional implementation details.
 `;
 
 // Topics that get a flat refusal no matter how the question is framed. This is
