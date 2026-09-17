@@ -57,6 +57,7 @@
     "#hz-foot{padding:0 12px 11px;font-size:10.5px;letter-spacing:.04em;color:var(--quiet)}",
     "#hz-foot a{text-decoration:underline;text-underline-offset:3px}",
     "#hz-close{min-width:40px;min-height:40px}#hz-send{min-height:44px}",
+    "@media(max-width:480px){#hz-panel{right:16px;bottom:16px;width:calc(100% - 32px);height:min(540px,calc(100dvh - 32px))}}",
     "@media (prefers-reduced-motion:reduce){#hz-launch{transition:none}}",
   ].join("");
 
