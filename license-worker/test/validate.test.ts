@@ -18,7 +18,7 @@ async function post(path: string, body: unknown): Promise<Response> {
 }
 
 describe("POST /validate", () => {
-  it("rolls expiry and inserts a telemetry row", async () => {
+  it("preserves perpetual expiry and inserts a telemetry row", async () => {
     await insertProLicense("HRM-PRO-VLDT-0001-AAAA");
     await post("/activate", { license_key: "HRM-PRO-VLDT-0001-AAAA", instance_id: "i1" });
 
@@ -36,7 +36,7 @@ describe("POST /validate", () => {
     });
     expect(res.status).toBe(200);
     const blob = (await res.json()) as { expires_at: string };
-    expect(blob.expires_at).toMatch(/^20\d\d-/);
+    expect(blob.expires_at).toBe("9999-12-31T23:59:59Z");
 
     const e = getTestEnv();
     const row = await e.DB.prepare(

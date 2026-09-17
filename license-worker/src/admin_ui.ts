@@ -1,8 +1,6 @@
 // Static single-page admin console served at GET /admin. It carries no secrets;
 // every data call is gated server-side by an admin session cookie (see admin.ts).
-// Styled to the Harmony brand spec (harmony-branding skill): amber + teal on ink,
-// warm white text, the H wordmark as the single glow, gradient only on the
-// wordmark and a thin card top-accent, no red (reserved for the security band).
+// Uses the current Harmony identity: static H, neutral surfaces and teal actions.
 // The inline script uses string concatenation (no template literals / ${}) so it
 // nests cleanly inside this TS template literal. CAUTION: do not use escape
 // sequences like \n in inner JS strings here -- inside this outer template literal
@@ -15,132 +13,189 @@ const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Harmony License Admin</title>
+<meta name="theme-color" content="#0c0c0d">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<script>
+// Apply the preference before styles load, avoiding a flash of the wrong theme.
+(() => {
+  const key = 'harmony-site-theme';
+  const system = window.matchMedia('(prefers-color-scheme: dark)');
+  const normalize = value => ['light', 'dark'].includes(value) ? value : 'system';
+  let preference = 'system';
+  try { preference = normalize(localStorage.getItem(key)); } catch { /* Storage can be unavailable. */ }
+
+  function apply() {
+    const theme = preference === 'system' ? (system.matches ? 'dark' : 'light') : preference;
+    document.documentElement.dataset.theme = theme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0c0c0d' : '#f4f2ef');
+    const control = document.querySelector('[data-theme-select]');
+    if (control) control.value = preference;
+  }
+
+  apply();
+  system.addEventListener('change', apply);
+  window.addEventListener('storage', event => {
+    if (event.key === key || event.key === null) {
+      preference = normalize(event.newValue);
+      apply();
+    }
+  });
+  document.addEventListener('DOMContentLoaded', () => {
+    apply();
+    document.querySelector('[data-theme-select]')?.addEventListener('change', event => {
+      preference = normalize(event.target.value);
+      try {
+        if (preference === 'system') localStorage.removeItem(key);
+        else localStorage.setItem(key, preference);
+      } catch { /* Keep the current-page choice usable without storage. */ }
+      apply();
+    });
+  });
+})();
+
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=DM+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
   :root {
-    --amber:#e8a020; --teal:#2dd4bf; --ink:#080808; --white:#f0ede8; --dim:#a6a39d;
-    --card:rgba(18,16,14,0.85); --card-border:rgba(240,237,232,0.10); --field:#0c0b0a;
-    --teal-dim:rgba(45,212,191,0.10); --teal-border:rgba(45,212,191,0.22);
+    color-scheme:dark; --ink:#0c0c0d; --card:#121213; --field:#171718; --white:#ececea; --dim:#a3a09b;
+    --card-border:rgba(255,255,255,.10); --strong:rgba(255,255,255,.18); --teal:#2dd4bf;
+    --teal-dim:rgba(45,212,191,.09); --teal-border:rgba(45,212,191,.3); --amber:#e8a020;
+    --red:#f0655a; --on-accent:#0c0c0d; --mono:'IBM Plex Mono',monospace;
+  }
+  :root[data-theme=light] {
+    color-scheme:light; --ink:#f4f2ef; --card:#fbfaf8; --field:#efedea; --white:#1c1b19; --dim:#55524d;
+    --card-border:#dbd7d1; --strong:#c8c3bb; --teal:#0d7b70; --teal-dim:rgba(13,123,112,.08);
+    --teal-border:rgba(13,123,112,.3); --amber:#8a5a0d; --red:#a63328; --on-accent:#fff;
   }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--ink); color:var(--white); font-family:'DM Sans',system-ui,sans-serif; font-weight:400; -webkit-font-smoothing:antialiased; }
-  .wrap { position:relative; max-width:980px; margin:0 auto; padding:48px 20px 80px; }
-
-  .brand { text-align:center; margin-bottom:36px; }
-  .wordmark-h {
-    display:inline-flex; align-items:center; justify-content:center;
-    width:52px; height:52px; border-radius:11px;
-    background:linear-gradient(135deg,var(--amber),var(--teal));
-    font-family:'Cinzel',serif; font-weight:900; font-size:26px; color:#080808;
-    box-shadow:0 0 40px rgba(232,160,32,0.4),0 0 80px rgba(45,212,191,0.2),0 4px 24px rgba(0,0,0,0.6);
-    animation:hPulse 2.8s ease-in-out infinite;
-  }
-  @keyframes hPulse {
-    0%,100% { box-shadow:0 0 40px rgba(232,160,32,0.4),0 0 80px rgba(45,212,191,0.2),0 4px 24px rgba(0,0,0,0.6); }
-    50% { box-shadow:0 0 56px rgba(232,160,32,0.55),0 0 110px rgba(45,212,191,0.3),0 4px 24px rgba(0,0,0,0.6); }
-  }
-  @media (prefers-reduced-motion: reduce) { .wordmark-h { animation:none; } }
-  .wordmark-name { font-family:'Cinzel',serif; font-weight:600; font-size:26px; letter-spacing:0.24em; text-transform:uppercase; margin:14px 0 0; text-shadow:0 2px 12px rgba(0,0,0,0.5); }
-  .wordmark-sub { font-weight:300; font-size:10px; letter-spacing:0.38em; text-transform:uppercase; color:var(--teal); margin:7px 0 0; }
-  .wordmark-desc { font-size:12px; color:var(--dim); letter-spacing:0.05em; margin:12px 0 0; }
-  .logout { position:absolute; top:24px; right:20px; }
-
-  .card { position:relative; background:var(--card); border:1px solid var(--card-border); border-radius:14px; padding:26px; margin:0 auto 20px; max-width:760px; }
-  .card.accent::before { content:""; position:absolute; top:0; left:0; right:0; height:2px; border-radius:14px 14px 0 0; background:linear-gradient(135deg,var(--amber),var(--teal)); }
-  #loginCard { max-width:420px; }
-
-  h2 { font-family:'Cinzel',serif; font-weight:600; font-size:14px; letter-spacing:0.06em; text-transform:uppercase; margin:0 0 16px; display:flex; align-items:center; gap:12px; }
-  .muted { color:var(--dim); font-size:13px; margin:0 0 14px; }
-
-  label { display:flex; flex-direction:column; gap:6px; font-size:10px; font-weight:500; letter-spacing:0.14em; text-transform:uppercase; color:var(--dim); }
-  input, select { background:var(--field); border:1px solid var(--card-border); color:var(--white); border-radius:8px; padding:10px 11px; font-size:14px; font-family:'DM Sans',sans-serif; }
-  input:focus, select:focus { outline:none; border-color:var(--teal); }
-  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px 18px; }
-  .grid .full, .grid button[type=submit] { grid-column:1 / -1; }
-
-  button { background:var(--amber); color:#1a1205; border:none; border-radius:8px; padding:11px 18px; font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; }
+  [hidden] { display:none!important; }
+  body { margin:0; background:var(--ink); color:var(--white); font:400 15px/1.6 'DM Sans',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  a { color:inherit; text-decoration:none; }
+  button,input,select,a { -webkit-tap-highlight-color:transparent; }
+  :focus-visible { outline:2px solid var(--teal); outline-offset:4px; }
+  ::selection { background:var(--teal); color:var(--on-accent); }
+  .skip { position:absolute; top:-100px; left:20px; padding:10px; background:var(--teal); color:var(--on-accent); z-index:10; }
+  .skip:focus { top:12px; }
+  .site-header { border-bottom:1px solid var(--card-border); }
+  .header-inner { max-width:1120px; margin:auto; padding:22px 32px; display:flex; align-items:center; justify-content:space-between; gap:24px; }
+  .brand { display:flex; align-items:center; gap:15px; }
+  .wordmark-h { font:400 38px/1 'Cinzel',Georgia,serif; color:var(--teal); padding-right:16px; border-right:1px solid var(--strong); }
+  .wordmark-name { display:block; font:400 19px/1.3 'Cinzel',Georgia,serif; letter-spacing:.19em; text-transform:uppercase; }
+  .wordmark-sub { display:block; font:10px/1.5 var(--mono); color:var(--dim); margin-top:4px; }
+  .header-actions { display:flex; gap:12px; align-items:center; }
+  .theme-select { min-height:44px; max-width:95px; font-size:13px; cursor:pointer; }
+  .wrap { max-width:1056px; margin:0 auto; padding:52px 32px 64px; }
+  .page-intro { margin-bottom:32px; }
+  .eyebrow { display:flex; align-items:center; gap:10px; color:var(--teal); font:11px/1.5 var(--mono); letter-spacing:.13em; text-transform:uppercase; margin:0 0 16px; }
+  .eyebrow::before { content:''; width:19px; height:1px; background:currentColor; }
+  h1 { font:400 clamp(30px,4vw,44px)/1.2 'Cinzel',Georgia,serif; letter-spacing:-.03em; margin:0 0 14px; }
+  .page-intro p:last-child { color:var(--dim); margin:0; }
+  .card { background:var(--card); border:1px solid var(--card-border); border-radius:10px; padding:28px; margin:0 0 24px; min-width:0; }
+  #loginCard { max-width:490px; }
+  h2 { font:400 22px/1.3 'Cinzel',Georgia,serif; letter-spacing:-.02em; margin:0 0 22px; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; }
+  .muted { color:var(--dim); font-size:13px; margin:0 0 16px; }
+  label { display:flex; flex-direction:column; gap:7px; font-size:13px; font-weight:500; color:var(--dim); }
+  input,select { min-width:0; min-height:44px; background:var(--field); border:1px solid var(--strong); color:var(--white); border-radius:6px; padding:10px 12px; font:400 14px 'DM Sans',system-ui,sans-serif; }
+  input::placeholder { color:var(--dim); opacity:.8; }
+  input:focus,select:focus { border-color:var(--teal); }
+  .grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px 24px; }
+  .grid .full,.grid button[type=submit] { grid-column:1/-1; }
+  .grid button[type=submit] { justify-self:start; }
+  button { background:var(--teal); color:var(--on-accent); border:1px solid transparent; border-radius:6px; min-height:44px; padding:10px 18px; font:500 14px 'DM Sans',system-ui,sans-serif; cursor:pointer; }
   button:hover { filter:brightness(1.08); }
-  button.ghost { background:none; color:var(--dim); border:1px solid var(--card-border); font-size:10px; padding:6px 12px; letter-spacing:0.12em; }
-  button.ghost:hover { color:var(--white); border-color:var(--teal-border); }
-  button.ghost.danger:hover { color:var(--amber); border-color:var(--amber); }
-
-  /* endpoint pack editor */
-  .packs-head { display:flex; align-items:center; justify-content:space-between; }
-  .packs-label { font-size:10px; font-weight:500; letter-spacing:0.14em; text-transform:uppercase; color:var(--dim); }
-  .pack-row { display:flex; align-items:center; gap:8px; margin-top:8px; }
-  .pack-row select { padding:7px 9px; }
-  .pack-qty { width:62px; padding:7px 9px; }
-  .pack-unit, .pack-x { color:var(--dim); font-size:12px; }
-  #packHint { margin:8px 0 0; }
-
-  .err { color:var(--amber); font-size:12px; margin-top:10px; min-height:1em; letter-spacing:0.02em; }
-  #loginForm { display:flex; gap:10px; }
-  #loginForm input { flex:1; }
-  #result { margin-top:18px; padding-top:16px; border-top:1px solid var(--card-border); }
-  .keyrow { display:flex; align-items:center; gap:12px; margin-top:8px; }
-  #keyValue { font-family:'Courier New',monospace; font-size:18px; letter-spacing:0.06em; color:var(--teal); }
-
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--card-border); vertical-align:middle; }
-  th { font-family:'Cinzel',serif; font-weight:400; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--teal); }
+  button.ghost { background:transparent; color:var(--white); border-color:var(--strong); font-size:13px; padding:8px 13px; }
+  button.ghost:hover { background:var(--field); border-color:var(--dim); }
+  button.ghost.danger { color:var(--red); }
+  button.ghost.danger:hover { border-color:var(--red); }
+  .packs-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .packs-label { color:var(--dim); font-size:13px; font-weight:500; }
+  .pack-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px; }
+  .pack-qty { width:70px; }
+  .pack-unit,.pack-x { color:var(--dim); font-size:13px; }
+  #packHint { margin:12px 0 0; max-width:650px; }
+  .err { color:var(--amber); font-size:13px; margin-top:12px; }
+  .err:empty { display:none; }
+  #loginForm { display:flex; flex-direction:column; align-items:stretch; gap:18px; }
+  #loginForm button { align-self:flex-start; }
+  #result { margin-top:24px; padding:18px; background:var(--teal-dim); border:1px solid var(--teal-border); border-radius:6px; }
+  .keyrow { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-top:8px; }
+  #keyValue { font:15px/1.7 var(--mono); color:var(--teal); overflow-wrap:anywhere; }
+  .table-scroll { max-width:100%; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th,td { text-align:left; padding:14px 12px; border-bottom:1px solid var(--card-border); vertical-align:middle; }
+  th { font:11px/1.5 var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--dim); }
+  td:first-child { min-width:160px; overflow-wrap:anywhere; }
   td.actions { white-space:nowrap; }
-  td button.ghost { font-size:9px; padding:4px 9px; margin-right:6px; }
-  tr.revoked td { opacity:0.55; }
-  .pill { font-size:9px; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; padding:3px 9px; border-radius:999px; white-space:nowrap; }
-  .pill.active { color:var(--teal); background:var(--teal-dim); border:1px solid var(--teal-border); }
-  .pill.revoked { color:var(--dim); background:rgba(240,237,232,0.04); border:1px solid rgba(240,237,232,0.18); }
-  .pill.bound { color:var(--teal); background:var(--teal-dim); border:1px solid var(--teal-border); }
-  .pill.unbound { color:var(--dim); background:rgba(240,237,232,0.04); border:1px solid rgba(240,237,232,0.18); }
-
-  /* detail modal */
-  .modal-overlay { position:fixed; inset:0; z-index:5000; background:rgba(0,0,0,0.66); display:flex; align-items:center; justify-content:center; padding:20px; }
-  .modal-overlay[hidden] { display:none; }
-  .modal { position:relative; background:var(--card); border:1px solid var(--card-border); border-radius:14px; padding:24px 26px; width:560px; max-width:100%; }
-  .modal::before { content:""; position:absolute; top:0; left:0; right:0; height:2px; border-radius:14px 14px 0 0; background:linear-gradient(135deg,var(--amber),var(--teal)); }
-  .modal h3 { font-family:'Cinzel',serif; font-weight:600; font-size:14px; letter-spacing:0.06em; text-transform:uppercase; margin:0 0 14px; }
-  .modal-row { display:flex; justify-content:space-between; gap:18px; padding:9px 0; border-bottom:1px solid var(--card-border); font-size:13px; }
-  .modal-row .k { color:var(--dim); text-transform:uppercase; letter-spacing:0.08em; font-size:10px; align-self:center; white-space:nowrap; }
-  .modal-row .v { text-align:right; word-break:break-all; }
-  .modal-row .v code { font-family:'Courier New',monospace; color:var(--teal); }
-  .modal-edit { display:flex; flex-direction:column; gap:6px; padding:9px 0; border-bottom:1px solid var(--card-border); }
-  .modal-edit .k { color:var(--dim); text-transform:uppercase; letter-spacing:0.08em; font-size:10px; }
+  .pill { display:inline-block; font:10px/1.5 var(--mono); letter-spacing:.05em; text-transform:uppercase; padding:5px 9px; border-radius:4px; white-space:nowrap; }
+  .pill.active,.pill.bound { color:var(--teal); background:var(--teal-dim); border:1px solid var(--teal-border); }
+  .pill.revoked,.pill.unbound { color:var(--dim); background:var(--field); border:1px solid var(--strong); }
+  .modal-overlay { position:fixed; inset:0; z-index:5000; background:rgba(0,0,0,.66); display:flex; align-items:center; justify-content:center; padding:20px; }
+  .modal { background:var(--card); border:1px solid var(--strong); border-radius:10px; padding:28px; width:620px; max-width:100%; max-height:calc(100dvh - 40px); overflow-y:auto; }
+  .modal h3 { font:400 24px/1.3 'Cinzel',Georgia,serif; margin:0 0 20px; }
+  .modal-row { display:flex; justify-content:space-between; gap:20px; padding:12px 0; border-bottom:1px solid var(--card-border); font-size:14px; }
+  .modal-row .k { color:var(--dim); font-size:12px; flex-shrink:0; }
+  .modal-row .v { text-align:right; overflow-wrap:anywhere; min-width:0; }
+  .modal-row .v code { font:12px/1.7 var(--mono); color:var(--teal); }
+  .modal-edit { display:flex; flex-direction:column; gap:7px; padding:12px 0; border-bottom:1px solid var(--card-border); }
+  .modal-edit .k,.modal-edit-packs .k { color:var(--dim); font-size:13px; }
   .modal-edit input { width:100%; }
-  .modal-edit-packs { padding:9px 0; border-bottom:1px solid var(--card-border); }
-  .modal-edit-packs .k { color:var(--dim); text-transform:uppercase; letter-spacing:0.08em; font-size:10px; }
-  .modal-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:18px; }
-  button.crm { background:rgba(224,80,64,0.14); color:#e05040; border:1px solid rgba(224,80,64,0.45); }
-  button.crm:hover { background:rgba(224,80,64,0.22); border-color:#e05040; color:#e05040; cursor:help; }
-
-  /* settings: CRM integration (placeholder) */
-  .settings-sub h3 { font-family:'Cinzel',serif; font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; margin:0 0 8px; color:var(--white); }
-  .map-preview { margin:16px 0 0; border:1px solid var(--card-border); border-radius:8px; overflow:hidden; }
-  .map-preview .map-head { font-size:9px; letter-spacing:0.16em; text-transform:uppercase; color:var(--dim); padding:9px 12px; background:rgba(240,237,232,0.03); }
-  .map-row { display:flex; justify-content:space-between; gap:12px; padding:8px 12px; font-size:12px; border-top:1px solid var(--card-border); }
-  .map-row .src { color:var(--white); }
-  .map-row .dst { color:var(--teal); font-family:'Courier New',monospace; }
+  .modal-edit-packs { padding:12px 0; }
+  .modal-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:24px; }
+  button.crm { background:var(--field); color:var(--dim); border-color:var(--strong); cursor:not-allowed; }
+  .settings-sub h3 { font-size:15px; font-weight:500; margin:0 0 8px; }
+  .map-preview { margin-top:20px; border:1px solid var(--card-border); border-radius:6px; overflow:hidden; }
+  .map-head { font:10px/1.6 var(--mono); letter-spacing:.04em; text-transform:uppercase; color:var(--dim); padding:12px 16px; background:var(--field); }
+  .map-row { display:flex; justify-content:space-between; gap:16px; padding:10px 16px; font-size:13px; border-top:1px solid var(--card-border); }
+  .map-row .dst { color:var(--teal); font:12px/1.6 var(--mono); text-align:right; }
+  .footer { display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; border-top:1px solid var(--card-border); padding-top:24px; color:var(--dim); font-size:12px; }
+  .footer a:hover { color:var(--teal); }
+  @media(max-width:600px) {
+    .header-inner { padding:18px 20px; gap:12px; flex-wrap:wrap; }
+    .brand { gap:10px; } .wordmark-h { font-size:30px; padding-right:10px; }
+    .wordmark-name { font-size:15px; letter-spacing:.13em; } .wordmark-sub { font-size:9px; }
+    .header-actions { gap:8px; margin-left:auto; }
+    .theme-select { padding:8px; max-width:86px; }
+    .wrap { padding:34px 20px 40px; } .card { padding:22px 18px; }
+    .grid { grid-template-columns:minmax(0,1fr); gap:18px; }
+    h2 { font-size:20px; } .modal { padding:22px 18px; }
+    .modal-row { gap:14px; } .modal-row .k { max-width:36%; }
+  }
+  @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; } }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <button id="logoutBtn" class="ghost logout" hidden>Sign out</button>
-
-  <div class="brand">
-    <div class="wordmark-h">H</div>
-    <div class="wordmark-name">Harmony AIO</div>
-    <div class="wordmark-sub">AI Operations Orchestration</div>
-    <div class="wordmark-desc">License Administration</div>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="https://www.harmonyaio.com/" aria-label="Harmony AIO home">
+      <span class="wordmark-h" aria-hidden="true">H</span>
+      <span><span class="wordmark-name">Harmony AIO</span><span class="wordmark-sub">License administration</span></span>
+    </a>
+    <div class="header-actions">
+      <select class="theme-select" data-theme-select aria-label="Color theme">
+        <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
+      </select>
+      <button id="logoutBtn" class="ghost" hidden>Sign out</button>
+    </div>
+  </div>
+</header>
+<main class="wrap" id="main">
+  <div class="page-intro">
+    <p class="eyebrow">Administration</p>
+    <h1>License control, clearly.</h1>
+    <p>Issue keys, manage capacity, and keep customer licenses in view.</p>
   </div>
 
   <section id="loginCard" class="card accent" hidden>
     <h2>Sign in</h2>
     <p class="muted">Enter the admin secret to issue license keys.</p>
     <form id="loginForm">
-      <input type="password" id="password" placeholder="Admin secret" autocomplete="current-password" required>
+      <label>Admin secret<input type="password" id="password" placeholder="Enter your admin secret" autocomplete="current-password" required></label>
       <button type="submit">Sign in</button>
     </form>
-    <div id="loginErr" class="err"></div>
+    <div id="loginErr" class="err" role="alert"></div>
   </section>
 
   <section id="issueCard" class="card accent" hidden>
@@ -186,7 +241,7 @@ const PAGE = `<!doctype html>
       </div>
       <button type="submit">Generate key</button>
     </form>
-    <div id="issueErr" class="err"></div>
+    <div id="issueErr" class="err" role="alert"></div>
     <div id="result" hidden>
       <span class="muted">New license key</span>
       <div class="keyrow"><code id="keyValue"></code><button id="copyBtn" type="button" class="ghost">Copy</button></div>
@@ -195,20 +250,20 @@ const PAGE = `<!doctype html>
 
   <section id="listCard" class="card" hidden>
     <h2>Issued licenses <button id="refreshBtn" type="button" class="ghost">Refresh</button></h2>
-    <table>
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Issued licenses"><table>
       <thead><tr><th>Organization</th><th>Status</th><th>Bound</th><th>Actions</th></tr></thead>
       <tbody id="licenseBody"></tbody>
-    </table>
+    </table></div>
   </section>
 
   <section id="settingsCard" class="card accent" hidden>
-    <h2>License Administration Settings</h2>
+    <h2>Administration settings</h2>
     <div class="settings-sub">
       <h3>CRM Integration</h3>
       <p class="muted">Connect to Dynamics 365 to sync issued licenses to CRM records. When live, you will map license fields to CRM fields here.</p>
       <!-- TODO: wire "Connect to CRM" to Dynamics 365 (D365). On connect, sync each
            license to a CRM record using the field map below, then link back. -->
-      <button id="crmBtn" type="button" class="crm" title="Coming Soon" aria-disabled="true">Connect to CRM</button>
+      <button id="crmBtn" type="button" class="crm" title="Coming soon" disabled>CRM integration · Coming soon</button>
       <div class="map-preview">
         <div class="map-head">Planned field mapping (configurable when the connector ships)</div>
         <div class="map-row"><span class="src">Organization</span><span class="dst">Company Name</span></div>
@@ -220,7 +275,8 @@ const PAGE = `<!doctype html>
       </div>
     </div>
   </section>
-</div>
+  <footer class="footer"><span>Harmony AIO · License administration</span><a href="https://www.harmonyaio.com/">Visit the website ↗</a></footer>
+</main>
 
 <div id="detailOverlay" class="modal-overlay" hidden>
   <div class="modal">
@@ -290,6 +346,7 @@ const PAGE = `<!doctype html>
   // ---- endpoint pack editor ----
   function makeSizeSelect() {
     var s = document.createElement('select');
+    s.setAttribute('aria-label', 'Endpoints per pack');
     [10, 20, 50, 100].forEach(function (n) {
       var o = document.createElement('option');
       o.value = String(n);
@@ -311,6 +368,7 @@ const PAGE = `<!doctype html>
     x.textContent = 'x';
     var q = document.createElement('input');
     q.type = 'number';
+    q.setAttribute('aria-label', 'Pack quantity');
     q.min = '1';
     q.value = String(qty || 1);
     q.className = 'pack-qty';
@@ -439,6 +497,7 @@ const PAGE = `<!doctype html>
     k.textContent = label;
     var inp = document.createElement('input');
     inp.id = id;
+    inp.setAttribute('aria-label', label);
     inp.value = val || '';
     wrap.appendChild(k);
     wrap.appendChild(inp);

@@ -15,6 +15,7 @@ import {
   handleAdminLogout,
 } from "./admin";
 import { handleAdminPage } from "./admin_ui";
+import { handleFavicon } from "./favicon";
 import { handleHealth } from "./health";
 import { WorkerError, internalError, notFound } from "./errors";
 import type { Env } from "./types";
@@ -27,6 +28,7 @@ export default {
       const method = req.method.toUpperCase();
 
       if (method === "GET" && path === "/health") return handleHealth();
+      if (method === "GET" && path === "/favicon.svg") return handleFavicon();
 
       if (method === "POST" && path === "/activate") return await handleActivate(req, env);
       if (method === "POST" && path === "/validate") return await handleValidate(req, env);
