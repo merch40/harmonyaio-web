@@ -48,9 +48,10 @@ schema or the customer seed script. The migration creates two tables and one
 index; it does not modify existing licenses. The staging table is empty after
 each successful transaction (or rolled back on error).
 
-Cloudflare authentication is currently required to complete the live release.
-The migration has been applied only to the local preview database. Deploying the
-new code without its migration deliberately prevents unaudited admin mutations.
+Published on 2026-09-17 from commit `388f0af`. The migration was applied to the
+production database before Worker version `cd1857fc-9f2f-4cc9-a1c9-d5ae4c76d3de`
+was deployed. Existing secret bindings and the database binding were preserved.
+Deploying the new code without its migration deliberately prevents unaudited admin mutations.
 Rolling back to an older Worker would also remove this protection; leaving the
 audit tables in place preserves existing history.
 
@@ -60,4 +61,7 @@ The automated suite covers complete admin mutation history, before/after values,
 retention after deletion, denied anonymous/customer access, login/session
 correlation, credential exclusion, throttled logins, cursor pagination, and
 transaction rollback on simulated audit-store failure. Browser verification uses
-only the local sample license and database.
+only the local sample license and database. All 64 service tests and type checking
+passed. Live checks confirmed the redesigned admin page, favicon, license-service
+health, and rejection of anonymous audit-history requests. The website signup
+health endpoint also passed. Production customer licenses were not changed for testing.
