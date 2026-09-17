@@ -3,10 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "preview": "node scripts/preview.mjs",
     "test": "vitest run",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "wrangler": "^4.134.0"
   }
 }

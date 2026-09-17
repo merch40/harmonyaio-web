@@ -27,3 +27,6 @@ _lucide.txt
 
 # Source audio files (keep out of /public, kept locally for re-encoding)
 audio-source/
+
+# Local prototype review artifacts and original brand backup
+output/
