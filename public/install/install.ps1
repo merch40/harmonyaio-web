@@ -33,6 +33,99 @@
     $dashboardPort = 8420
     $defaultResolver = 'https://harmonyaio.com/api/releases/latest'
 
+    # The server (service working directory = $installDir) writes its one-time
+    # setup token to this SYSTEM/Administrators-only file on a start that
+    # still needs setup, reuses it across restarts, and deletes it when setup
+    # completes. It is never printed to logs\server.log (ADR 0243).
+    $setupTokenFile = Join-Path $installDir 'data\setup-token'
+
+    # Returns $true when the setup-token file at $Path holds one well-formed
+    # token (43 base64url characters, optional LF or CRLF ending) on exactly
+    # one line. The file's content is never assigned to a variable: only its
+    # byte length and line count are kept, and Select-String -Quiet matches it
+    # in place, so even Set-PSDebug -Trace cannot show the token (ADR 0243).
+    # No log is ever read.
+    function Test-HarmonySetupTokenFileReady([string]$Path) {
+        try {
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+            $length = (Get-Item -LiteralPath $Path).Length
+            if ($length -lt 43 -or $length -gt 45) { return $false }
+            $lines = (Get-Content -LiteralPath $Path | Measure-Object).Count
+            if ($lines -ne 1) { return $false }
+            return [bool](Select-String -LiteralPath $Path -Pattern '^[A-Za-z0-9_-]{43}$' -CaseSensitive -Quiet)
+        } catch {
+            return $false
+        }
+    }
+
+    # Asks the running server whether first-run setup is still required
+    # (GET /api/setup/status, unauthenticated). Returns 'required',
+    # 'complete', or $null when no URL answers. The server arms or regenerates
+    # the token file before it serves HTTP, so 'required' means the file is
+    # current. Loopback only, so a self-signed certificate is accepted.
+    function Get-HarmonySetupState([string[]]$BaseUrls) {
+        foreach ($base in $BaseUrls) {
+            if (-not $base) { continue }
+            $previous = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+            try {
+                $params = @{ UseBasicParsing = $true; Uri = ($base + '/api/setup/status'); TimeoutSec = 3 }
+                if ($PSVersionTable.PSVersion.Major -ge 6) {
+                    $params['SkipCertificateCheck'] = $true
+                } else {
+                    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+                }
+                $resp = Invoke-WebRequest @params
+                $body = $resp.Content | ConvertFrom-Json
+                if ($body.required -eq $true) { return 'required' }
+                if ($body.required -eq $false) { return 'complete' }
+            } catch {
+            } finally {
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $previous
+            }
+        }
+        return $null
+    }
+
+    # The installer's final setup report. Waits (bounded) for the server to
+    # answer its setup status, then prints the setup URL, the token file's
+    # PATH and the elevated command to read it - never the token, which would
+    # land in PowerShell transcripts and remote-execution logs. A server whose
+    # setup is already complete gets no token path at all.
+    function Write-HarmonySetupReport([string]$TokenFile, [int]$TimeoutSeconds, [string]$SetupUrl, [string[]]$BaseUrls) {
+        $state = $null
+        for ($waited = 0; ; $waited++) {
+            $state = Get-HarmonySetupState $BaseUrls
+            if ($state -eq 'required' -and (Test-HarmonySetupTokenFileReady $TokenFile)) { break }
+            if ($state -eq 'complete') { break }
+            if ($waited -ge $TimeoutSeconds) { $state = 'timeout'; break }
+            Start-Sleep -Seconds 1
+        }
+        Write-Host ("  Setup:      {0}" -f $SetupUrl)
+        if ($state -eq 'complete') {
+            Write-Host '  First-run setup is already complete; sign in with your owner account.'
+            return
+        }
+        if ($state -eq 'required') {
+            Write-Host ("  Setup token file (Administrators-only, never in the server log): {0}" -f $TokenFile)
+        } else {
+            Write-Host ("  The server did not confirm its setup status within {0}s." -f $TimeoutSeconds)
+            Write-Host ("  If setup is still required, the setup token file is: {0}" -f $TokenFile)
+        }
+        Write-Host '  Read the token from an elevated PowerShell:'
+        Write-Host ("    Get-Content -LiteralPath '{0}'" -f $TokenFile)
+        Write-Host '  The installer does not print the token itself: it would land in terminal transcripts and logs.'
+    }
+
+    # Test entry point (packaging/webinstall tests): run the shipped final
+    # setup report against the given token file and status base URL (waiting
+    # HARMONY_INSTALL_TEST_SETUP_TIMEOUT seconds, default 0); install nothing.
+    if ($env:HARMONY_INSTALL_TEST_SETUP_REPORT_TOKEN_FILE) {
+        $testTimeout = 0
+        if ($env:HARMONY_INSTALL_TEST_SETUP_TIMEOUT) { $testTimeout = [int]$env:HARMONY_INSTALL_TEST_SETUP_TIMEOUT }
+        Write-HarmonySetupReport $env:HARMONY_INSTALL_TEST_SETUP_REPORT_TOKEN_FILE $testTimeout 'http://localhost:8420/setup' @($env:HARMONY_INSTALL_TEST_SETUP_STATUS_URL)
+        return
+    }
+
     Write-Host '=== Harmony AIO Server Installer ===' -ForegroundColor Cyan
     Write-Host ''
 
@@ -185,12 +278,23 @@
 
         Write-Host 'Starting and health-checking the service...'
         & $winPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $payload 'install.ps1') `
-            -InstallDir $installDir -ServiceName $serviceName -LegacyTaskName $legacyTaskName -FinalizeOnly
+            -InstallDir $installDir -ServiceName $serviceName -LegacyTaskName $legacyTaskName -FinalizeOnly `
+            -SkipSetupReport
         if ($LASTEXITCODE -ne 0) {
             Write-Host 'Service finalization failed; rolling back the prepared service...' -ForegroundColor Yellow
             & $winPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $payload 'install.ps1') `
                 -InstallDir $installDir -ServiceName $serviceName -RollbackPrepared | Out-Null
             throw 'Harmony service startup or health verification failed. The prepared service was rolled back.'
+        }
+
+        Write-Host 'Enabling signed server update checks...'
+        & $winPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+            -File (Join-Path $payload 'register-dogfood-updates.ps1') `
+            -InstallDir $installDir -ServerServiceName $serviceName `
+            -LegacyServerTaskName $legacyTaskName
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "WARNING: server installation succeeded, but signed updater registration failed (exit $LASTEXITCODE)." -ForegroundColor Yellow
+            Write-Host "         Settings > System > Updates will explain the missing prerequisite."
         }
     } finally {
         Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -219,34 +323,16 @@
     }
 
     # --- Report -----------------------------------------------------------------
-    # Best-effort: surface the one-time setup token from the protected server
-    # log. It is reissued on every start until setup completes.
-    $setupToken = $null
-    $serverLog = Join-Path $installDir 'logs\server.log'
-    for ($attempt = 0; $attempt -lt 10 -and -not $setupToken; $attempt++) {
-        Start-Sleep -Seconds 1
-        if (Test-Path -LiteralPath $serverLog) {
-            $match = Select-String -LiteralPath $serverLog -Pattern 'HARMONY INITIAL SETUP TOKEN' -Context 0, 1 |
-                Select-Object -Last 1
-            if ($match -and $match.Context.PostContext.Count -ge 1) {
-                $setupToken = $match.Context.PostContext[0].Trim()
-            }
-        }
-    }
-
     Write-Host ''
     Write-Host ("=== Harmony AIO Server v{0} installed ===" -f $release.version) -ForegroundColor Green
     Write-Host ''
     Write-Host ("  Service:    {0} (automatic, delayed start)" -f $serviceName)
     Write-Host ("  Dashboard:  http://localhost:{0}" -f $dashboardPort)
     Write-Host ("  Local agent: {0}" -f $localAgentNote)
-    if ($setupToken) {
-        Write-Host ("  Setup:      http://localhost:{0}/setup" -f $dashboardPort)
-        Write-Host ("  Setup token: {0}" -f $setupToken)
-    } else {
-        Write-Host '  First-run setup token (printed to the server log on startup):'
-        Write-Host ("    Select-String -Path '{0}' -Pattern 'HARMONY INITIAL SETUP TOKEN' -Context 0,1" -f $serverLog)
-    }
+    # Fenced on the server's own setup status (it arms the token file before
+    # serving HTTP), never on the file's mere existence: a stale or not-yet-
+    # regenerated file is never presented as current.
+    Write-HarmonySetupReport $setupTokenFile 60 ("http://localhost:{0}/setup" -f $dashboardPort) @(("http://127.0.0.1:{0}" -f $dashboardPort), 'https://127.0.0.1:8443')
     Write-Host ''
     Write-Host '  Windows Firewall was opened for TCP 8420 on Domain and Private profiles.'
     Write-Host '  Uninstall: irm https://harmonyaio.com/uninstall.ps1 | iex'

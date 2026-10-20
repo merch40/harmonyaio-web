@@ -95,7 +95,8 @@ main() {
             log "Removing the provisioned local agent..."
             $SUDO systemctl stop harmony-agent 2>/dev/null || true
             $SUDO systemctl disable harmony-agent 2>/dev/null || true
-            $SUDO rm -f "$SYSTEMD_DIR/harmony-agent.service" /opt/harmony/harmony-agent "$CONFIG_DIR/agent.json" "$CONFIG_DIR/local-agent.provisioned"
+            $SUDO systemctl disable --now harmony-agent-enroll 2>/dev/null || true
+            $SUDO rm -f "$SYSTEMD_DIR/harmony-agent.service" "$SYSTEMD_DIR/harmony-agent-enroll.service" /opt/harmony/harmony-agent "$CONFIG_DIR/agent.json" "$CONFIG_DIR/local-agent.provisioned"
             $SUDO rmdir /opt/harmony 2>/dev/null || true
             $SUDO systemctl daemon-reload
         fi

@@ -34,14 +34,20 @@
 #                         air-gapped staging); both must be set together
 #   HARMONY_ALLOW_HTTP=1  permit plain-http artifact URLs (testing only)
 #
-# This script never handles secrets. The server prints its one-time setup
-# token to the systemd journal on first start.
+# This script never handles secrets of its own. On first start the server
+# writes its one-time setup token to the root/service-only file
+# /var/lib/harmony/data/setup-token (never to the journal); this script
+# prints that file's path and the command to read it, never the token
+# (ADR 0243).
 set -euo pipefail
 
 RESOLVER_URL="${HARMONY_RESOLVER_URL:-https://harmonyaio.com/api/releases/latest}"
 BINARY_PATH="/usr/local/bin/harmony-server"
 SERVICE_NAME="harmony-server"
 SERVICE_UNIT="/etc/systemd/system/harmony-server.service"
+# The unit's WorkingDirectory is /var/lib/harmony; the server keeps its data
+# in ./data there.
+SETUP_TOKEN_FILE="/var/lib/harmony/data/setup-token"
 DASHBOARD_PORT="8420"
 TLS_PORT="8443"
 # Matches internal/updatechannel MaxArtifactBytes; download cap when the
@@ -140,6 +146,87 @@ sha256_of() {
     fi
 }
 
+# setup_token_file_ready <sudo> <path>
+#
+# Succeeds when the server's setup-token file holds exactly one line that is
+# one well-formed token (43 base64url characters, LF or CRLF ending). The
+# file's content is never read into a shell variable or command argument:
+# grep matches it in place and only a line count is captured, so even
+# `set -x` tracing cannot show the token (ADR 0243).
+setup_token_file_ready() {
+    local sudo="$1" path="$2"
+    $sudo test -s "$path" 2>/dev/null || return 1
+    [ "$($sudo grep -c '' "$path" 2>/dev/null)" = "1" ] || return 1
+    $sudo grep -qxE '[A-Za-z0-9_-]{43}'$'\r''?' "$path" 2>/dev/null
+}
+
+# setup_status_state <base-url>...
+#
+# Asks the running server whether first-run setup is still required
+# (GET /api/setup/status, unauthenticated). Prints "required", "complete",
+# or nothing when no URL answers. The server arms or regenerates the token
+# file before it serves HTTP, so "required" means the file is current.
+setup_status_state() {
+    local url body
+    for url in "$@"; do
+        body=""
+        if have curl; then
+            body="$(curl -fsSk --max-time 3 "$url/api/setup/status" 2>/dev/null)" || body=""
+        elif have wget; then
+            body="$(wget -qO- --no-check-certificate -T 3 -t 1 --max-redirect=0 "$url/api/setup/status" 2>/dev/null)" || body=""
+        fi
+        body="$(printf '%s' "$body" | tr -d ' \t\r\n')"
+        case "$body" in
+            *'"required":true'*)  printf 'required\n'; return 0 ;;
+            *'"required":false'*) printf 'complete\n'; return 0 ;;
+        esac
+    done
+}
+
+# report_setup_token <sudo> <token-file> <timeout-seconds> <setup-url> <base-url>...
+#
+# The installer's final setup report. It waits (bounded) for the server to
+# answer its setup status, then prints the setup URL, the token file's PATH
+# and the elevated command to read it - never the token, which would land in
+# terminal transcripts, cloud-init and CI logs. A server whose setup is
+# already complete gets no token path at all.
+report_setup_token() {
+    local sudo="$1" path="$2" timeout="$3" setup_url="$4"
+    shift 4
+    local waited=0 state=""
+    while :; do
+        state="$(setup_status_state "$@")"
+        if [ "$state" = "required" ]; then
+            setup_token_file_ready "$sudo" "$path" && break
+        elif [ "$state" = "complete" ]; then
+            break
+        fi
+        if [ "$waited" -ge "$timeout" ]; then
+            state="timeout"
+            break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    log "  Setup:      $setup_url"
+    case "$state" in
+        complete)
+            log "  First-run setup is already complete; sign in with your owner account."
+            return 0
+            ;;
+        required)
+            log "  Setup token file (root-only, never in the journal): $path"
+            ;;
+        *)
+            log "  The server did not confirm setup status within ${timeout}s."
+            log "  If setup is still required, the setup token file is: $path"
+            ;;
+    esac
+    log "  Read the token with:"
+    log "    sudo cat $path"
+    log "  The installer does not print the token itself: it would land in terminal transcripts and logs."
+}
 main() {
     log "=== Harmony AIO Server Installer ==="
     log ""
@@ -330,11 +417,16 @@ if [ "$enable_tls" = "1" ] && ! grep -q '^HARMONY_BOOTSTRAP_TLS=' /etc/harmony/h
         printf 'HARMONY_BOOTSTRAP_TLS=1\n'
     } >> /etc/harmony/harmony.env
 fi
+if ! bash "$pkgdir/register-dogfood-updates.sh"; then
+    echo "WARNING: server installation succeeded, but signed updater registration failed." >&2
+    echo "         Settings > System > Updates will explain the missing prerequisite." >&2
+fi
 ROOTEOF
 
     # --- Firewall (ufw / firewalld only; anything else is left alone) -------
-    local fw_ports="8420"
-    [ "$enable_tls" = "1" ] && fw_ports="8443 8420"
+    # 8444 is the agent-CA listener agents dial (ADR 0262 CX5A).
+    local fw_ports="8420 8444"
+    [ "$enable_tls" = "1" ] && fw_ports="8443 8420 8444"
     local fw_kind=""
     if have ufw && $SUDO ufw status 2>/dev/null | grep -q '^Status: active'; then
         fw_kind="ufw"
@@ -395,13 +487,6 @@ ROOTEOF
     systemctl is-active --quiet "$SERVICE_NAME" || \
         fail "Service did not reach active state. Inspect: sudo journalctl -u $SERVICE_NAME -n 100 --no-pager"
 
-    # Best-effort: surface the one-time setup token from the journal so the
-    # operator does not have to dig for it. Reissued on every start until
-    # setup completes, so a miss here is only a minor inconvenience.
-    sleep 2
-    local token=""
-    token="$($SUDO journalctl -u "$SERVICE_NAME" -n 300 --no-pager -o cat 2>/dev/null | \
-        awk '/HARMONY INITIAL SETUP TOKEN/{getline; gsub(/^[ \t]+|[ \t]+$/, ""); print; exit}')" || token=""
 
     # --- Local agent ---------------------------------------------------------
     # The package ships bin/provision-local-agent.sh: it installs a Harmony
@@ -463,13 +548,10 @@ ROOTEOF
     log ""
     log "  Dashboard:  $dash_url"
     log "  Local agent: $local_agent"
-    if [ -n "$token" ]; then
-        log "  Setup:      $dash_url/setup"
-        log "  Setup token: $token"
-    else
-        log "  First-run setup token (printed to the journal on startup):"
-        log "    sudo journalctl -u $SERVICE_NAME -o cat | grep -A 1 'HARMONY INITIAL SETUP TOKEN'"
-    fi
+    # The unit is Type=simple, so "active" precedes the server's setup-token
+    # bootstrap: fence on the server's own setup status, not on the file.
+    report_setup_token "$SUDO" "$SETUP_TOKEN_FILE" 60 "$dash_url/setup" \
+        "https://127.0.0.1:$TLS_PORT" "http://127.0.0.1:$DASHBOARD_PORT"
     if [ "$enable_tls" = "1" ]; then
         log ""
         log "  HTTPS uses a self-signed certificate, so your browser will warn on"
@@ -490,4 +572,10 @@ ROOTEOF
     log "  Uninstall: curl -fsSL https://harmonyaio.com/uninstall.sh | bash"
 }
 
+# HARMONY_INSTALL_SOURCE_ONLY=1 defines the functions without installing
+# anything: the test entry point packaging/webinstall tests use to call the
+# shipped functions directly (source the script, then call them).
+if [ "${HARMONY_INSTALL_SOURCE_ONLY:-}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
 main "$@"
