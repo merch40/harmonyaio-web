@@ -303,8 +303,8 @@
     # --- Local agent --------------------------------------------------------
     # The installed package ships bin\provision-local-agent.ps1: it installs a
     # Harmony agent on this host so the new server can monitor its own machine
-    # and map the network. The agent stays idle until the operator approves it
-    # on the /setup page (checkbox, on by default).
+    # and map the network. It enrolls itself once first-run setup creates the
+    # first tenant (ADR 0262 CX5B); there is no approval step.
     $localAgentNote = 'not installed'
     $provisionScript = Join-Path $installDir 'bin\provision-local-agent.ps1'
     if ($env:HARMONY_NO_LOCAL_AGENT -eq '1') {
@@ -314,7 +314,7 @@
         Write-Host 'Provisioning the local Harmony agent for this host...'
         & $winPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $provisionScript -ServerRoot $installDir
         if ($LASTEXITCODE -eq 0) {
-            $localAgentNote = 'installed (approve it during setup)'
+            $localAgentNote = 'installed (enrolls itself once setup creates the first tenant)'
         } else {
             Write-Host 'WARNING: local agent provisioning failed; the server install is unaffected.' -ForegroundColor Yellow
             Write-Host ("         Re-run later, elevated: powershell -ExecutionPolicy Bypass -File `"{0}`"" -f $provisionScript)
@@ -334,7 +334,10 @@
     # regenerated file is never presented as current.
     Write-HarmonySetupReport $setupTokenFile 60 ("http://localhost:{0}/setup" -f $dashboardPort) @(("http://127.0.0.1:{0}" -f $dashboardPort), 'https://127.0.0.1:8443')
     Write-Host ''
-    Write-Host '  Windows Firewall was opened for TCP 8420 on Domain and Private profiles.'
+    Write-Host ("  Setup token file: {0}" -f $setupTokenFile)
+    Write-Host ("  By hostname: http://{0}:{1}/setup" -f [System.Net.Dns]::GetHostName(), $dashboardPort)
+    Write-Host '  If your browser refuses the hostname because of an older certificate, use the IP address.'
+    Write-Host '  Windows Firewall was opened for TCP 8420 and 8444 on Domain and Private profiles.'
     Write-Host '  Uninstall: irm https://harmonyaio.com/uninstall.ps1 | iex'
     Write-Host ''
 }

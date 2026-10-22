@@ -50,6 +50,75 @@ SERVICE_UNIT="/etc/systemd/system/harmony-server.service"
 SETUP_TOKEN_FILE="/var/lib/harmony/data/setup-token"
 DASHBOARD_PORT="8420"
 TLS_PORT="8443"
+
+# >>> harmony-firewall (ADR 0263 W2 round 2; byte-identical in the tarball and
+# hosted install.sh and uninstall.sh, pinned by packaging tests)
+# The installers open exactly the ports the service binds under the env file
+# they wrote: HTTPS on 8443 when HARMONY_BOOTSTRAP_TLS=1 is seeded (its 8420
+# redirect listener stays closed), plain HTTP on 8420 otherwise, plus the
+# agent-CA listener on 8444 (ADR 0262 CX5A). Each port this install opened is
+# recorded as "<ufw|firewalld> <port>"; a port that was already open is left
+# out, so the uninstallers remove exactly what the install added.
+HARMONY_FW_RECORD="/etc/harmony/firewall-opened"
+harmony_fw_plan() {
+    if ${SUDO:-} grep -qx 'HARMONY_BOOTSTRAP_TLS=1' "$1" 2>/dev/null; then
+        echo "8443 8444"
+    else
+        echo "8420 8444"
+    fi
+}
+harmony_fw_open() {
+    local kind="$1" port
+    shift
+    for port in "$@"; do
+        case "$kind" in
+            ufw)
+                if ${SUDO:-} ufw show added 2>/dev/null | grep -x "ufw allow $port/tcp" >/dev/null; then
+                    continue
+                fi
+                ${SUDO:-} ufw allow "$port/tcp" >/dev/null
+                ;;
+            firewalld)
+                if ${SUDO:-} firewall-cmd --permanent --query-port="$port/tcp" >/dev/null 2>&1; then
+                    continue
+                fi
+                ${SUDO:-} firewall-cmd --permanent --add-port="$port/tcp" >/dev/null
+                ;;
+            *) return 1 ;;
+        esac
+        printf '%s %s\n' "$kind" "$port" | ${SUDO:-} tee -a "$HARMONY_FW_RECORD" >/dev/null
+    done
+    if [ "$kind" = "firewalld" ]; then
+        ${SUDO:-} firewall-cmd --reload >/dev/null
+    fi
+}
+harmony_fw_remove_recorded() {
+    local kind port extra seen=" " reload=false
+    if ! ${SUDO:-} test -f "$HARMONY_FW_RECORD"; then
+        return 0
+    fi
+    while read -r kind port extra || [ -n "$kind" ]; do
+        [ -z "$extra" ] || continue
+        case "$kind" in ufw|firewalld) ;; *) continue ;; esac
+        case "$port" in ''|*[!0-9]*|0*) continue ;; esac
+        [ "${#port}" -le 5 ] && [ "$port" -le 65535 ] || continue
+        case "$seen" in *" $kind:$port "*) continue ;; esac
+        seen="$seen$kind:$port "
+        echo "Removing firewall rule: $kind TCP $port"
+        case "$kind" in
+            ufw) ${SUDO:-} ufw --force delete allow "$port/tcp" >/dev/null || true ;;
+            firewalld)
+                ${SUDO:-} firewall-cmd --permanent --remove-port="$port/tcp" >/dev/null || true
+                reload=true
+                ;;
+        esac
+    done < <(${SUDO:-} cat "$HARMONY_FW_RECORD")
+    if [ "$reload" = true ]; then
+        ${SUDO:-} firewall-cmd --reload >/dev/null || true
+    fi
+    ${SUDO:-} rm -f "$HARMONY_FW_RECORD"
+}
+# <<< harmony-firewall
 # Matches internal/updatechannel MaxArtifactBytes; download cap when the
 # resolver did not supply an exact size.
 MAX_ARTIFACT_BYTES=536870912
@@ -410,6 +479,20 @@ if systemctl is-active --quiet "$service" 2>/dev/null; then
     systemctl stop "$service"
 fi
 bash "$pkgdir/install.sh" --from-bootstrap
+# Low-port drop-in (ADR 0263 s.5.1). Newer tarballs install it themselves;
+# writing it here too covers a package built before they did.
+install -d -m 755 /etc/systemd/system/harmony-server.service.d
+cat > /etc/systemd/system/harmony-server.service.d/20-low-ports.conf <<'DROPIN'
+# /etc/systemd/system/harmony-server.service.d/20-low-ports.conf
+# Installed by the Harmony installers (ADR 0263 section 5.1): lets the
+# unprivileged harmony user bind ports below 1024. NoNewPrivileges=yes stays
+# on; ambient capabilities are granted by systemd at exec time.
+[Service]
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+DROPIN
+chmod 644 /etc/systemd/system/harmony-server.service.d/20-low-ports.conf
+systemctl daemon-reload
 if [ "$enable_tls" = "1" ] && ! grep -q '^HARMONY_BOOTSTRAP_TLS=' /etc/harmony/harmony.env 2>/dev/null; then
     {
         printf '\n# Added by the hosted installer: first boot enables HTTPS with a\n'
@@ -425,8 +508,8 @@ ROOTEOF
 
     # --- Firewall (ufw / firewalld only; anything else is left alone) -------
     # 8444 is the agent-CA listener agents dial (ADR 0262 CX5A).
-    local fw_ports="8420 8444"
-    [ "$enable_tls" = "1" ] && fw_ports="8443 8420 8444"
+    local fw_ports
+    fw_ports="$(harmony_fw_plan /etc/harmony/harmony.env)"
     local fw_kind=""
     if have ufw && $SUDO ufw status 2>/dev/null | grep -q '^Status: active'; then
         fw_kind="ufw"
@@ -453,14 +536,7 @@ ROOTEOF
             fi
         fi
         if [ "$open_fw" = "1" ]; then
-            local fw_port
-            for fw_port in $fw_ports; do
-                case "$fw_kind" in
-                    ufw)       $SUDO ufw allow "$fw_port/tcp" >/dev/null ;;
-                    firewalld) $SUDO firewall-cmd --permanent --add-port="$fw_port/tcp" >/dev/null ;;
-                esac
-            done
-            [ "$fw_kind" = "firewalld" ] && $SUDO firewall-cmd --reload >/dev/null
+            harmony_fw_open "$fw_kind" $fw_ports
             log "Opened TCP $fw_ports in $fw_kind."
         fi
     fi
@@ -491,8 +567,8 @@ ROOTEOF
     # --- Local agent ---------------------------------------------------------
     # The package ships bin/provision-local-agent.sh: it installs a Harmony
     # agent on this host so the new server can monitor its own machine and map
-    # the network. The agent stays idle until the operator approves it on the
-    # /setup page (checkbox, on by default).
+    # the network. It enrolls itself once first-run setup creates the first
+    # tenant (ADR 0262 CX5B); there is no approval step.
     local local_agent="not installed"
     if [ "${HARMONY_NO_LOCAL_AGENT:-}" = "1" ]; then
         log "HARMONY_NO_LOCAL_AGENT=1 set: skipping local agent provisioning."
@@ -506,7 +582,7 @@ ROOTEOF
     elif $SUDO test -f /var/lib/harmony/bin/provision-local-agent.sh; then
         log "Provisioning the local Harmony agent for this host..."
         if $SUDO bash /var/lib/harmony/bin/provision-local-agent.sh; then
-            local_agent="installed (approve it during setup)"
+            local_agent="installed (enrolls itself once setup creates the first tenant)"
         else
             log "WARNING: local agent provisioning failed; the server install is unaffected."
             log "         Re-run later with: sudo bash /var/lib/harmony/bin/provision-local-agent.sh"
@@ -538,9 +614,13 @@ ROOTEOF
         fi
     fi
 
+    local host_name=""
+    host_name="$(hostname -f 2>/dev/null || hostname 2>/dev/null)" || host_name=""
     local dash_url="http://${host_ip:-localhost}:$DASHBOARD_PORT"
+    local name_url="http://${host_name:-localhost}:$DASHBOARD_PORT"
     if [ "$enable_tls" = "1" ]; then
         dash_url="https://${host_ip:-localhost}:$TLS_PORT"
+        name_url="https://${host_name:-localhost}:$TLS_PORT"
     fi
 
     log ""
@@ -552,6 +632,10 @@ ROOTEOF
     # bootstrap: fence on the server's own setup status, not on the file.
     report_setup_token "$SUDO" "$SETUP_TOKEN_FILE" 60 "$dash_url/setup" \
         "https://127.0.0.1:$TLS_PORT" "http://127.0.0.1:$DASHBOARD_PORT"
+    log "  By IP:        $dash_url/setup"
+    log "  By hostname:  $name_url/setup"
+    log "  Setup token file: $SETUP_TOKEN_FILE (sudo cat it)"
+    log "  If your browser refuses the hostname because of an older certificate, use the IP address."
     if [ "$enable_tls" = "1" ]; then
         log ""
         log "  HTTPS uses a self-signed certificate, so your browser will warn on"

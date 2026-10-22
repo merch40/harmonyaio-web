@@ -10,7 +10,8 @@
 # install root and removes the SYSTEM update task before the service.
 #
 # If the release cannot be downloaded (offline host), a minimal fallback
-# removes the service, the named scheduled tasks, and the firewall rule.
+# removes the service, the named scheduled tasks, and the firewall rules the
+# install recorded.
 # The fallback never recursively deletes the install tree: purge requires
 # the verified helper's reparse-point and ownership guards.
 #
@@ -26,8 +27,32 @@
     $serviceName = 'HarmonyAIOServer'
     $legacyTaskName = 'Harmony AIO Server'
     $updateTaskName = 'Harmony AIO Dogfood Updates'
-    $firewallRuleName = 'Harmony AIO Server TCP 8420'
     $installDir = Join-Path $env:ProgramData 'Harmony AIO'
+
+    function Remove-HarmonyRecordedFirewallRules {
+        param([string]$TargetDir)
+        # Removes exactly the rules the install recorded in
+        # config\firewall-rules.txt (ADR 0263 W2 round 2; identical in install.ps1,
+        # uninstall.ps1 and the hosted uninstall.ps1). An install from before the
+        # record existed created only the 8420 and 8444 rules.
+        $record = Join-Path $TargetDir "config\firewall-rules.txt"
+        $names = @("Harmony AIO Server TCP 8420", "Harmony AIO Server TCP 8444")
+        if (Test-Path -LiteralPath $record -PathType Leaf) {
+            $names = @(Get-Content -LiteralPath $record -Encoding UTF8 -ErrorAction Stop |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { $_ -match '^Harmony AIO Server TCP \d{1,5}$' } |
+                Select-Object -Unique)
+        }
+        $rules = @(Get-NetFirewallRule -ErrorAction Stop |
+            Where-Object { $names -contains $_.DisplayName })
+        foreach ($rule in $rules) {
+            $rule | Remove-NetFirewallRule -ErrorAction Stop
+            Write-Host "Removed firewall rule: $($rule.DisplayName)"
+        }
+        if (Test-Path -LiteralPath $record -PathType Leaf) {
+            Remove-Item -LiteralPath $record -Force -ErrorAction Stop
+        }
+    }
     $defaultResolver = 'https://harmonyaio.com/api/releases/latest'
 
     Write-Host '=== Harmony AIO Server Uninstaller ===' -ForegroundColor Cyan
@@ -152,11 +177,7 @@
                 Write-Host "Service $serviceName is not installed."
             }
 
-            $rule = Get-NetFirewallRule -DisplayName $firewallRuleName -ErrorAction SilentlyContinue
-            if ($rule) {
-                Write-Host "Removing firewall rule '$firewallRuleName'..."
-                $rule | Remove-NetFirewallRule
-            }
+            Remove-HarmonyRecordedFirewallRules -TargetDir $installDir
 
             if (Test-Path -LiteralPath $installDir) {
                 Write-Host ''
