@@ -58,7 +58,7 @@ export default {
     } catch (err) {
       if (err instanceof WorkerError) return err.toResponse();
       console.error("unhandled error", err);
-      return internalError((err as Error).message ?? "unknown").toResponse();
+      return internalError().toResponse();
     }
   },
 };
