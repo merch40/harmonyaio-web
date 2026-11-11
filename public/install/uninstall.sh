@@ -7,7 +7,9 @@
 # Stops and disables the service, removes the binary and unit file.
 # Data, config, and logs are preserved unless --purge (or HARMONY_PURGE=1)
 # is given, which also removes /etc/harmony, /var/lib/harmony,
-# /var/log/harmony, and the service user.
+# /var/log/harmony, and the service user. A co-located Harmony agent's files
+# (agent.json, trust/, its state and logs) are kept; the agent has its own
+# uninstaller.
 #
 # Paths intentionally mirror packaging/tarball/uninstall.sh - a contract
 # test keeps the two in sync.
@@ -21,6 +23,7 @@ LOG_DIR="/var/log/harmony"
 SERVICE_USER="harmony"
 SYSTEMD_DIR="/etc/systemd/system"
 SERVICE_FILE="harmony-server.service"
+AGENT_DIR="/opt/harmony"
 
 log()  { printf '%s\n' "$*"; }
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -94,6 +97,36 @@ harmony_fw_remove_recorded() {
 }
 # <<< harmony-firewall
 
+# A Harmony agent on this host keeps its identity and trust in the same
+# directories the server uses, so a purge must leave those files alone.
+agent_installed() {
+    local p
+    for p in "$CONFIG_DIR/agent.json" "$CONFIG_DIR/trust" "$AGENT_DIR/harmony-agent" \
+        "$SYSTEMD_DIR/harmony-agent.service" "$SYSTEMD_DIR/harmony-agent-enroll.service"; do
+        if ${SUDO:-} test -e "$p" || ${SUDO:-} test -L "$p"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# purge_dir_keeping DIR NAME...: remove every entry of DIR except the named
+# agent-owned ones, then DIR itself if that leaves it empty. find never follows
+# a symlink, and a symlinked DIR is skipped.
+purge_dir_keeping() {
+    local dir="$1" name
+    shift
+    if ! ${SUDO:-} test -d "$dir" || ${SUDO:-} test -L "$dir"; then
+        return 0
+    fi
+    local args=()
+    for name in "$@"; do
+        args+=(! -name "$name")
+    done
+    ${SUDO:-} find "$dir" -mindepth 1 -maxdepth 1 "${args[@]}" -exec rm -rf -- {} +
+    ${SUDO:-} rmdir "$dir" 2>/dev/null || true
+}
+
 main() {
     local purge=false
     if [ "${1:-}" = "--purge" ] || [ "${HARMONY_PURGE:-}" = "1" ]; then
@@ -110,6 +143,12 @@ main() {
         else
             fail "Run as root, or install sudo."
         fi
+    fi
+
+    # A purge never follows a symlink out of /etc/harmony: refuse before
+    # anything is stopped or removed.
+    if { $SUDO test -L "$CONFIG_DIR" || { $SUDO test -e "$CONFIG_DIR" && ! $SUDO test -d "$CONFIG_DIR"; }; } && [ "$purge" = true ]; then
+        fail "$CONFIG_DIR is a symlink or not a directory; refusing to purge. Nothing was removed."
     fi
 
     # Remove the signed-update controller first so nothing restarts the
@@ -170,12 +209,28 @@ main() {
             $SUDO systemctl stop harmony-agent 2>/dev/null || true
             $SUDO systemctl disable harmony-agent 2>/dev/null || true
             $SUDO systemctl disable --now harmony-agent-enroll 2>/dev/null || true
-            $SUDO rm -f "$SYSTEMD_DIR/harmony-agent.service" "$SYSTEMD_DIR/harmony-agent-enroll.service" /opt/harmony/harmony-agent "$CONFIG_DIR/agent.json" "$CONFIG_DIR/local-agent.provisioned"
-            $SUDO rmdir /opt/harmony 2>/dev/null || true
+            $SUDO rm -f "$SYSTEMD_DIR/harmony-agent.service" "$SYSTEMD_DIR/harmony-agent-enroll.service" "$AGENT_DIR/harmony-agent" "$CONFIG_DIR/agent.json" "$CONFIG_DIR/local-agent.provisioned"
+            if $SUDO test -L "$CONFIG_DIR/trust"; then
+                $SUDO rm -f "$CONFIG_DIR/trust"
+            else
+                $SUDO rm -rf "$CONFIG_DIR/trust"
+            fi
+            $SUDO rmdir "$AGENT_DIR" 2>/dev/null || true
             $SUDO systemctl daemon-reload
         fi
-        log "Purging all data, config, and logs..."
-        $SUDO rm -rf "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
+        if agent_installed; then
+            log "Purging server data, config, and logs (the Harmony agent's files are kept)..."
+            purge_dir_keeping "$CONFIG_DIR" agent.json trust 'enroll*.token'
+            purge_dir_keeping "$DATA_DIR" harmony-agent-state.db harmony-agent-state.db-journal \
+                harmony-agent-state.db-wal harmony-agent-state.db-shm discovery-report.json harmony-audit.log update
+            purge_dir_keeping "$LOG_DIR" harmony-agent.log harmony-audit.log
+            log "KEPT the Harmony agent's configuration (agent.json, trust/) in $CONFIG_DIR: an agent is installed on this host."
+            log "To remove the agent too, run its uninstaller from the Harmony server that manages it:"
+            log "  curl -sSL http://<server>/uninstall.sh | sudo bash -s -- --yes"
+        else
+            log "Purging all data, config, and logs..."
+            $SUDO rm -rf "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
+        fi
         if id -u "$SERVICE_USER" >/dev/null 2>&1; then
             log "Removing service user: $SERVICE_USER"
             $SUDO userdel "$SERVICE_USER" 2>/dev/null || true
