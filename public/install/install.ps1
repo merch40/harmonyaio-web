@@ -292,9 +292,12 @@
             -File (Join-Path $payload 'register-dogfood-updates.ps1') `
             -InstallDir $installDir -ServerServiceName $serviceName `
             -LegacyServerTaskName $legacyTaskName
+        $updaterNote = 'registered (SYSTEM scheduled task; automatic install stays off until enabled in Settings > Updates)'
         if ($LASTEXITCODE -ne 0) {
+            $registerScript = Join-Path $installDir 'register-dogfood-updates.ps1'
             Write-Host "WARNING: server installation succeeded, but signed updater registration failed (exit $LASTEXITCODE)." -ForegroundColor Yellow
             Write-Host "         Settings > System > Updates will explain the missing prerequisite."
+            $updaterNote = ("NOT REGISTERED - this server will not see new releases. Fix, elevated: powershell -ExecutionPolicy Bypass -File `"{0}`" -InstallDir `"{1}`" -ServerServiceName {2}" -f $registerScript, $installDir, $serviceName)
         }
     } finally {
         Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -329,6 +332,7 @@
     Write-Host ("  Service:    {0} (automatic, delayed start)" -f $serviceName)
     Write-Host ("  Dashboard:  http://localhost:{0}" -f $dashboardPort)
     Write-Host ("  Local agent: {0}" -f $localAgentNote)
+    Write-Host ("  Update polling: {0}" -f $updaterNote)
     # Fenced on the server's own setup status (it arms the token file before
     # serving HTTP), never on the file's mere existence: a stale or not-yet-
     # regenerated file is never presented as current.

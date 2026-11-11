@@ -128,6 +128,118 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# harmony_install_log <sudo-or-empty> <message>: append a timestamped line to
+# the install log; never fails the install.
+HARMONY_INSTALL_LOG="/var/log/harmony-install.log"
+harmony_install_log() {
+    local sudo="$1"
+    shift
+    # shellcheck disable=SC2086
+    printf '%s harmony-install: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | $sudo tee -a "$HARMONY_INSTALL_LOG" >/dev/null 2>&1 || true
+}
+
+# Update polling report. The root step persists the package's registrar to
+# HARMONY_REGISTRAR_COPY and writes key=value lines (TRUST_STATUS/REASON/FIX/
+# NEXT from the bundled install.sh, UPDATER_REASON/FIX/NEXT from the
+# registrar's own "ERROR:"/"Fix:"/"Then:" lines) to a root-only report file;
+# the summary shows why registration or pin provisioning failed, not just
+# that it did. A *_FIX value is one pasteable command; *_NEXT is prose.
+HARMONY_REGISTRAR_COPY="/var/lib/harmony/register-dogfood-updates.sh"
+HARMONY_HOSTED_REREGISTER="curl -fsSL https://harmonyaio.com/install.sh | sudo HARMONY_REINSTALL=1 bash"
+UPDATER_REASON=""
+UPDATER_FIRST_FIX=""
+UPDATER_NEXT=""
+UPDATER_FIX_CMD=""
+TRUST_STATUS=""
+TRUST_REASON=""
+TRUST_FIX=""
+TRUST_NEXT=""
+
+# harmony_registrar_command <sudo-or-empty>: a registration command that
+# works on this host. The persisted copy only when it exists (older packages
+# never wrote it), otherwise the hosted re-run, which registers on reinstall.
+harmony_registrar_command() {
+    local sudo="${1:-}"
+    # shellcheck disable=SC2086
+    if $sudo test -f "$HARMONY_REGISTRAR_COPY" 2>/dev/null; then
+        printf 'sudo bash %s\n' "$HARMONY_REGISTRAR_COPY"
+    else
+        printf '%s\n' "$HARMONY_HOSTED_REREGISTER"
+    fi
+}
+
+# harmony_registrar_label [then]: the line that introduces UPDATER_FIX_CMD.
+# The hosted one-liner reinstalls Harmony in place; the registrar copy only
+# registers the update polling units, so each gets its own label.
+harmony_registrar_label() {
+    if [ "$UPDATER_FIX_CMD" = "$HARMONY_HOSTED_REREGISTER" ]; then
+        if [ "${1:-}" = "then" ]; then
+            printf '%s\n' "Then re-run the installer (this reinstalls Harmony in place and registers updates):"
+        else
+            printf '%s\n' "Re-run the installer (this reinstalls Harmony in place and registers updates):"
+        fi
+    elif [ "${1:-}" = "then" ]; then
+        printf '%s\n' "Then register updates with:"
+    else
+        printf '%s\n' "Register updates with:"
+    fi
+}
+
+# harmony_report_value <report-text> <key>: the last value written for key.
+harmony_report_value() {
+    printf '%s\n' "$1" | sed -n "s/^$2=//p" | tail -n 1
+}
+
+# harmony_load_updater_report <sudo-or-empty> <report-file>
+harmony_load_updater_report() {
+    local sudo="${1:-}" file="${2:-}" body=""
+    if [ -n "$file" ]; then
+        # shellcheck disable=SC2086
+        body="$($sudo cat "$file" 2>/dev/null)" || body=""
+    fi
+    UPDATER_REASON="$(harmony_report_value "$body" UPDATER_REASON)"
+    UPDATER_FIRST_FIX="$(harmony_report_value "$body" UPDATER_FIX)"
+    UPDATER_NEXT="$(harmony_report_value "$body" UPDATER_NEXT)"
+    TRUST_STATUS="$(harmony_report_value "$body" TRUST_STATUS)"
+    TRUST_REASON="$(harmony_report_value "$body" TRUST_REASON)"
+    TRUST_FIX="$(harmony_report_value "$body" TRUST_FIX)"
+    TRUST_NEXT="$(harmony_report_value "$body" TRUST_NEXT)"
+    UPDATER_FIX_CMD="$(harmony_registrar_command "$sudo")"
+}
+
+# report_updater_state <registered|NOT registered>: the summary's update
+# polling and trust pin lines. Every "Fix:" and "First fix:" line, and the
+# registration command printed on its own line, carries exactly one pasteable
+# command; prose goes on its own line.
+report_updater_state() {
+    if [ "$1" = "registered" ]; then
+        log "  Update polling: registered (harmony-updater.timer enabled; automatic install stays off until enabled in Settings > Updates)"
+    else
+        log "  Update polling: NOT REGISTERED - this server will not see new releases."
+        [ -z "$UPDATER_REASON" ] || log "                  Reason: $UPDATER_REASON"
+        if [ -n "$UPDATER_FIRST_FIX" ]; then
+            log "                  First fix: $UPDATER_FIRST_FIX"
+            [ -z "$UPDATER_NEXT" ] || log "                  Then: $UPDATER_NEXT"
+            log "                  $(harmony_registrar_label then)"
+            log "                  $UPDATER_FIX_CMD"
+        else
+            [ -z "$UPDATER_NEXT" ] || log "                  Next: $UPDATER_NEXT"
+            log "                  $(harmony_registrar_label)"
+            log "                  $UPDATER_FIX_CMD"
+        fi
+        log "                  Log: $HARMONY_INSTALL_LOG"
+    fi
+    if [ "$TRUST_STATUS" = "failed" ]; then
+        log "  Update trust pins: NOT PROVISIONED - ${TRUST_REASON:-reason not reported}"
+        if [ -n "$TRUST_FIX" ]; then
+            log "                  Fix: $TRUST_FIX"
+            [ -z "$TRUST_NEXT" ] || log "                  Then: $TRUST_NEXT"
+        else
+            [ -z "$TRUST_NEXT" ] || log "                  Next: $TRUST_NEXT"
+        fi
+    fi
+}
+
 # have_tty reports whether this process can actually talk to a controlling
 # terminal.
 #
@@ -478,7 +590,13 @@ if systemctl is-active --quiet "$service" 2>/dev/null; then
     echo "Stopping running service for upgrade..."
     systemctl stop "$service"
 fi
-bash "$pkgdir/install.sh" --from-bootstrap
+# This shell reads its own script from stdin, so no child may inherit it: a
+# child that read stdin would swallow every step below without any error.
+# HARMONY_UPDATER_REPORT collects why pin provisioning or registration
+# failed (root-only file in the root-owned data dir; older packages ignore it).
+report="/var/lib/harmony/install-updater-report"
+rm -f "$report"
+HARMONY_UPDATER_REPORT="$report" bash "$pkgdir/install.sh" --from-bootstrap </dev/null
 # Low-port drop-in (ADR 0263 s.5.1). Newer tarballs install it themselves;
 # writing it here too covers a package built before they did.
 install -d -m 755 /etc/systemd/system/harmony-server.service.d
@@ -500,11 +618,54 @@ if [ "$enable_tls" = "1" ] && ! grep -q '^HARMONY_BOOTSTRAP_TLS=' /etc/harmony/h
         printf 'HARMONY_BOOTSTRAP_TLS=1\n'
     } >> /etc/harmony/harmony.env
 fi
-if ! bash "$pkgdir/register-dogfood-updates.sh"; then
-    echo "WARNING: server installation succeeded, but signed updater registration failed." >&2
-    echo "         Settings > System > Updates will explain the missing prerequisite." >&2
+# Current tarballs register update polling inside install.sh; this covers a
+# package that did not. The parent re-verifies and reports either way. Older
+# packages never kept a registrar copy, so persist one: the summary's fix
+# command must name a file that exists after this package is deleted.
+if [ -f "$pkgdir/register-dogfood-updates.sh" ] && [ ! -f /var/lib/harmony/register-dogfood-updates.sh ]; then
+    install -m 755 -o root -g root "$pkgdir/register-dogfood-updates.sh" /var/lib/harmony/register-dogfood-updates.sh || true
 fi
+if ! { systemctl is-enabled --quiet harmony-updater.timer && systemctl is-enabled --quiet harmony-updater.path; } 2>/dev/null; then
+    regerr="$rootdir/registrar.err"
+    regrc=0
+    bash "$pkgdir/register-dogfood-updates.sh" </dev/null 2>"$regerr" || regrc=$?
+    cat "$regerr" >&2 || true
+    if [ "$regrc" -ne 0 ]; then
+        echo "WARNING: server installation succeeded, but signed updater registration failed." >&2
+        regreason="$(sed -n '/^ERROR: /{s/^ERROR: //;p;q;}' "$regerr" | tr -d '\r')"
+        regfix="$(sed -n '/^[[:space:]]*Fix: /{s/^[[:space:]]*Fix: //;p;q;}' "$regerr" | tr -d '\r')"
+        regnext="$(sed -n '/^[[:space:]]*\(Then\|Next\): /{s/^[[:space:]]*\(Then\|Next\): //;p;q;}' "$regerr" | tr -d '\r')"
+        [ -n "$regreason" ] || regreason="register-dogfood-updates.sh exited $regrc"
+        { printf 'UPDATER_REASON=%s\n' "$regreason"; printf 'UPDATER_FIX=%s\n' "$regfix"; printf 'UPDATER_NEXT=%s\n' "$regnext"; } >> "$report" 2>/dev/null || true
+    fi
+fi
+chmod 600 "$report" 2>/dev/null || true
 ROOTEOF
+
+    # --- Update polling: verify, log, and report ---------------------------
+    # Judged from systemd state, not from what a script said it did.
+    local updater_status="registered"
+    harmony_load_updater_report "$SUDO" /var/lib/harmony/install-updater-report
+    $SUDO rm -f /var/lib/harmony/install-updater-report 2>/dev/null || true
+    if [ "$TRUST_STATUS" = "failed" ]; then
+        harmony_install_log "$SUDO" "update trust pins NOT provisioned (hosted installer, v$version): $TRUST_REASON"
+    fi
+    if $SUDO systemctl is-enabled --quiet harmony-updater.timer 2>/dev/null &&
+        $SUDO systemctl is-enabled --quiet harmony-updater.path 2>/dev/null; then
+        harmony_install_log "$SUDO" "updater registration OK: harmony-updater.timer and .path enabled (hosted installer, v$version)"
+    else
+        updater_status="NOT registered"
+        harmony_install_log "$SUDO" "updater registration FAILED (hosted installer, v$version): harmony-updater.timer/.path not enabled${UPDATER_REASON:+: $UPDATER_REASON}"
+        log ""
+        log "WARNING: signed update polling is NOT registered; this server will not see new releases."
+        [ -z "$UPDATER_REASON" ] || log "         Reason: $UPDATER_REASON"
+        [ -z "$UPDATER_FIRST_FIX" ] || log "         First fix: $UPDATER_FIRST_FIX"
+        if [ -n "$UPDATER_NEXT" ]; then
+            if [ -n "$UPDATER_FIRST_FIX" ]; then log "         Then: $UPDATER_NEXT"; else log "         Next: $UPDATER_NEXT"; fi
+        fi
+        log "         $(harmony_registrar_label)"
+        log "         $UPDATER_FIX_CMD"
+    fi
 
     # --- Firewall (ufw / firewalld only; anything else is left alone) -------
     # 8444 is the agent-CA listener agents dial (ADR 0262 CX5A).
@@ -546,6 +707,7 @@ ROOTEOF
         log ""
         log "HARMONY_NO_START=1 set: service installed and enabled but not started."
         log "Start it with: sudo systemctl start $SERVICE_NAME"
+        report_updater_state "$updater_status"
         return 0
     fi
 
@@ -628,6 +790,7 @@ ROOTEOF
     log ""
     log "  Dashboard:  $dash_url"
     log "  Local agent: $local_agent"
+    report_updater_state "$updater_status"
     # The unit is Type=simple, so "active" precedes the server's setup-token
     # bootstrap: fence on the server's own setup status, not on the file.
     report_setup_token "$SUDO" "$SETUP_TOKEN_FILE" 60 "$dash_url/setup" \
